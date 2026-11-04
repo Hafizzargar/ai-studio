@@ -2,7 +2,7 @@ import json
 import shutil
 import wave
 
-from PIL import Image
+from PIL import Image, ImageChops
 import pytest
 
 from aistudio import config, project, scenes, subtitles, tts, jobs, visuals
@@ -87,6 +87,19 @@ def test_diagram_reveals_and_highlights_concepts_at_spoken_words():
     assert len({box[1] for box in portrait}) == len(portrait)
 
 
+def test_water_cycle_animation_has_motion_and_focuses_scene_phase(tmp_path):
+    scene = scenes.new_scene(1, "Precipitation", "Cloud droplets fall as rain.")
+    assert visuals.water_cycle_phase(scene["heading"]) == "precipitation"
+    frames = visuals.animated_water_cycle(
+        scene, "Water Cycle", (320, 180), "educational", tmp_path, fps=4, loop_seconds=2
+    )
+    assert len(frames) == 8
+    assert all(path.exists() and duration == pytest.approx(0.25) for path, duration in frames)
+    with Image.open(frames[0][0]) as first, Image.open(frames[1][0]) as later:
+        assert first.size == (480, 270)
+        assert ImageChops.difference(first.convert("RGB"), later.convert("RGB")).getbbox() is not None
+
+
 def test_hash_changes_only_when_relevant():
     p = project.default_settings()
     s = scenes.new_scene(1, "A", "Hello there.")
@@ -126,6 +139,27 @@ def test_srt_and_ass(tmp_path):
 def test_roman_urdu_is_blocked():
     with pytest.raises(tts.TTSError):
         tts.check_language("ur-roman", "piper", "x")
+
+
+def test_roman_urdu_uses_windows_voice_when_backend_is_auto(tmp_path, monkeypatch):
+    def fake_sapi(text, output, voice, speed):
+        with wave.open(str(output), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(tts.RATE)
+            audio.writeframes(b"\x01\x00" * tts.RATE)
+
+    monkeypatch.setattr(tts, "available_backends", lambda: {
+        "piper": False, "sapi": True, "espeak": False, "silent": True,
+    })
+    monkeypatch.setitem(tts._BACKENDS, "sapi", fake_sapi)
+
+    path, backend = tts.synth_sentence(
+        "Yeh Roman Urdu hai.", "ur-roman", {"tts_backend": "auto", "voice": ""}, tmp_path / "cache"
+    )
+
+    assert backend == "sapi"
+    assert path.exists()
 
 
 def test_urdu_needs_urdu_voice():

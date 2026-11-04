@@ -103,6 +103,11 @@ def render_scene(proj: dict, scene: dict, idx: int, total: int) -> tuple[Path, f
             raise RenderError(f"{scene['scene_id']}: PDF not found: {pdf}")
         visuals.pdf_page_card(scene, pdf, size, st["theme"], sdir / "bg.png")
         video_input = ["-framerate", str(fps), "-loop", "1", "-i", "bg.png"]
+    elif vis.get("type") == "water_cycle":
+        frames = visuals.animated_water_cycle(scene, proj["title"], size, st["theme"], sdir)
+        animation = sdir / "water_cycle.mp4"
+        _encode_diagram_frames(frames, animation, fps, sum(duration for _, duration in frames), sdir)
+        video_input = ["-stream_loop", "-1", "-i", animation.name]
     else:
         frames = visuals.animated_title_card(scene, idx, total, proj["title"], size, st["theme"], cues, sdir)
         diagram_video = sdir / "diagram.mp4"

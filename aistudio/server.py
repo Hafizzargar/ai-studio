@@ -34,6 +34,7 @@ class NewProject(BaseModel):
     resolution: str = "720p"
     aspect: str = "16:9"
     fps: int = 24
+    template: str | None = None
 
 
 class ScriptIn(BaseModel):
@@ -57,7 +58,9 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return config.tool_report()
+    report = config.tool_report()
+    report["sapi_voices"] = tts.sapi_voices()
+    return report
 
 
 @app.get("/api/projects")
@@ -67,12 +70,34 @@ def projects():
 
 @app.post("/api/projects")
 def create_project(body: NewProject):
+    if body.language not in {"en", "ur", "ur-roman"}:
+        raise HTTPException(400, "language must be 'en', 'ur', or 'ur-roman'")
+    if body.template not in (None, "water_cycle"):
+        raise HTTPException(400, "template must be 'water_cycle'")
+    if body.template == "water_cycle" and body.language != "en":
+        raise HTTPException(400, "The water-cycle lesson template is currently available in English only")
+
+    template_script = None
+    if body.template == "water_cycle":
+        try:
+            template_script = (config.ROOT / "samples" / "sample_script.txt").read_text(encoding="utf-8")
+        except OSError as e:
+            raise HTTPException(500, f"Could not load the water-cycle lesson template: {e}")
+
     try:
-        return project.create(body.title, body.mode, language=body.language, voice=body.voice,
-                              tts_backend=body.tts_backend, resolution=body.resolution,
-                              aspect=body.aspect, fps=body.fps)
+        p = project.create(body.title, body.mode, language=body.language, voice=body.voice,
+                           tts_backend=body.tts_backend, resolution=body.resolution,
+                           aspect=body.aspect, fps=body.fps)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if template_script is not None:
+        p["scenes"] = script_to_scenes(template_script, body.language)
+        for scene in p["scenes"]:
+            scene["visual"] = {"type": "water_cycle"}
+        (project.project_dir(p["id"]) / "source" / "script.txt").write_text(
+            template_script, encoding="utf-8")
+        project.save(p["id"], p)
+    return p
 
 
 @app.get("/api/projects/{pid}")

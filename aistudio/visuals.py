@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import math
 import re
 import textwrap
 from pathlib import Path
@@ -347,6 +348,193 @@ def animated_title_card(scene: dict, idx: int, total: int, project_title: str,
         path = out_dir / "diagram_000.png"
         title_card(scene, idx, total, project_title, size, theme, path)
         return [(path, max((float(cue["end"]) for cue in cues), default=1.0))]
+    return frames
+
+
+def water_cycle_phase(heading: str) -> str:
+    heading = heading.casefold()
+    for phase, words in (
+        ("evaporation", ("evaporation", "transpiration")),
+        ("condensation", ("condensation", "cloud")),
+        ("precipitation", ("precipitation", "rain", "snow", "hail")),
+        ("collection", ("collection", "runoff", "groundwater")),
+    ):
+        if any(word in heading for word in words):
+            return phase
+    if "summary" in heading or "cycle" in heading:
+        return "all"
+    return "all"
+
+
+def _draw_drop(draw: ImageDraw.ImageDraw, x: int, y: int, radius: int,
+               color: tuple[int, int, int]) -> None:
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+    draw.polygon(((x - radius, y), (x, y - round(radius * 1.9)),
+                  (x + radius, y)), fill=color)
+
+
+def _draw_water_cycle_frame(scene: dict, project_title: str, size: tuple[int, int],
+                            theme: str, phase: str, progress: float,
+                            out: Path) -> None:
+    width, height = size
+    top, bottom, accent = THEMES.get(theme, THEMES["educational"])
+    image = _gradient(size, top, bottom)
+    draw = ImageDraw.Draw(image)
+    scale = min(width / 1280, height / 720)
+
+    def point(x: float, y: float) -> tuple[int, int]:
+        return round(x * width), round(y * height)
+
+    def active(name: str) -> bool:
+        return phase == "all" or phase == name
+
+    colors = {
+        "evaporation": (255, 190, 78),
+        "condensation": (111, 216, 255),
+        "precipitation": (89, 169, 255),
+        "collection": (74, 226, 190),
+    }
+    muted = (68, 96, 116)
+    labels = (
+        ("EVAPORATION", "evaporation"), ("CONDENSATION", "condensation"),
+        ("PRECIPITATION", "precipitation"), ("COLLECTION", "collection"),
+    )
+    heading_font = _font(max(18, round(min(width, height) * 0.052)), bold=True)
+    small_font = _font(max(13, round(min(width, height) * 0.021)), bold=True)
+    pad = round(min(width, height) * 0.055)
+    draw.text((pad, pad), scene.get("heading", "Water Cycle"),
+              font=heading_font, fill=(250, 253, 255))
+    caption = project_title[:42]
+    draw.text((width - pad - draw.textlength(caption, font=small_font), pad),
+              caption, font=small_font, fill=(210, 225, 237))
+
+    if width / height >= 1.2:
+        chip_y, chip_w = 0.40, 0.205
+        chip_xs = (0.025, 0.265, 0.505, 0.745)
+        chip_h = 0.055
+    else:
+        chip_y, chip_w = 0.36, 0.44
+        chip_xs = (0.035, 0.525, 0.035, 0.525)
+        chip_h = 0.045
+    for index, ((label, name), x) in enumerate(zip(labels, chip_xs)):
+        row_offset = 0 if width / height >= 1.2 else (index // 2) * 0.057
+        x1, y1 = point(x, chip_y + row_offset)
+        x2, y2 = point(x + chip_w, chip_y + chip_h + row_offset)
+        color = colors[name] if active(name) else muted
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=round(14 * scale),
+                               fill=(13, 36, 53), outline=color, width=max(2, round(2 * scale)))
+        text_w = draw.textlength(label, font=small_font)
+        draw.text((x1 + (x2 - x1 - text_w) / 2, y1 + (y2 - y1 - small_font.size) / 2),
+                  label, font=small_font, fill=color)
+
+    sun_x, sun_y = point(0.15, 0.19)
+    sun_radius = round(min(width, height) * 0.057)
+    pulse = 1 + (0.06 * (0.5 + 0.5 * math.sin(progress * math.tau)))
+    sun_radius = round(sun_radius * pulse)
+    ray_color = colors["evaporation"] if active("evaporation") else muted
+    for ray in range(12):
+        angle = ray * math.tau / 12
+        inner = sun_radius + round(7 * scale)
+        outer = sun_radius + round((17 + 3 * pulse) * scale)
+        draw.line((sun_x + round(math.cos(angle) * inner),
+                   sun_y + round(math.sin(angle) * inner),
+                   sun_x + round(math.cos(angle) * outer),
+                   sun_y + round(math.sin(angle) * outer)),
+                  fill=ray_color, width=max(2, round(3 * scale)))
+    draw.ellipse((sun_x - sun_radius, sun_y - sun_radius,
+                  sun_x + sun_radius, sun_y + sun_radius), fill=(255, 205, 91))
+
+    cloud_center = point(0.70, 0.22)
+    cloud_radius = round(min(width, height) * 0.067)
+    cloud_color = colors["condensation"] if active("condensation") else (151, 177, 194)
+    for dx, dy, factor in ((-1.0, 0.10, 0.76), (-0.48, -0.22, 0.98),
+                           (0.18, -0.28, 1.12), (0.78, -0.03, 0.83)):
+        cx = cloud_center[0] + round(dx * cloud_radius)
+        cy = cloud_center[1] + round(dy * cloud_radius)
+        radius = round(cloud_radius * factor)
+        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius),
+                     fill=cloud_color)
+    cloud_base_y = cloud_center[1] + round(cloud_radius * 0.46)
+    draw.rounded_rectangle((cloud_center[0] - round(cloud_radius * 1.25),
+                            cloud_base_y - round(cloud_radius * 0.25),
+                            cloud_center[0] + round(cloud_radius * 1.18),
+                            cloud_base_y + round(cloud_radius * 0.47)),
+                           radius=round(cloud_radius * 0.35), fill=cloud_color)
+
+    sea_y = round(height * 0.76)
+    land = [point(0, 0.76), point(0.12, 0.70), point(0.25, 0.72),
+            point(0.39, 0.61), point(0.53, 0.69), point(0.68, 0.59),
+            point(0.83, 0.68), point(1, 0.64), (width, height), (0, height)]
+    draw.polygon(land, fill=(67, 133, 91))
+    water_top = colors["collection"] if active("collection") else (34, 139, 190)
+    draw.rectangle((0, sea_y, width, height), fill=(18, 102, 153))
+    draw.line((0, sea_y, width, sea_y), fill=water_top, width=max(3, round(4 * scale)))
+    for wave in range(3):
+        y = sea_y + round((wave + 1) * height * 0.055)
+        points = [point(x / 20, y / height + 0.008 * math.sin(
+            (x / 20 + progress * 2) * math.tau)) for x in range(21)]
+        draw.line(points, fill=(87, 190, 216), width=max(2, round(2 * scale)))
+
+    river_color = colors["collection"] if active("collection") else (72, 152, 177)
+    river = [point(0.70, 0.64), point(0.66, 0.69), point(0.72, 0.73), point(0.63, 0.77)]
+    draw.line(river, fill=river_color, width=max(8, round(min(width, height) * 0.022)), joint="curve")
+    draw.line(river, fill=(128, 218, 228), width=max(2, round(min(width, height) * 0.006)), joint="curve")
+
+    plant_x, plant_y = point(0.36, 0.69)
+    plant_color = (77, 208, 126) if active("evaporation") else (78, 151, 103)
+    draw.line((plant_x, plant_y, plant_x, plant_y - round(height * 0.10)),
+              fill=(93, 120, 76), width=max(4, round(6 * scale)))
+    for direction, level in ((-1, 0.04), (1, 0.08), (-1, 0.12), (1, 0.16)):
+        lx, ly = plant_x + round(direction * height * 0.035), plant_y - round(height * level)
+        draw.ellipse((lx - round(height * 0.023), ly - round(height * 0.012),
+                      lx + round(height * 0.023), ly + round(height * 0.012)),
+                     fill=plant_color)
+
+    radius = max(4, round(min(width, height) * 0.012))
+    if active("evaporation"):
+        for i in range(6):
+            t = (progress + i / 6) % 1
+            x = round(width * (0.18 + 0.18 * (i % 3) / 3 + 0.012 * math.sin(t * math.tau)))
+            y = round(height * (0.75 - 0.29 * t))
+            _draw_drop(draw, x, y, radius, colors["evaporation"])
+    if active("condensation"):
+        for i in range(7):
+            angle = progress * math.tau + i * math.tau / 7
+            x = cloud_center[0] + round(math.cos(angle) * cloud_radius * 0.9)
+            y = cloud_center[1] + round(math.sin(angle) * cloud_radius * 0.45)
+            draw.ellipse((x - radius // 2, y - radius // 2,
+                          x + radius // 2, y + radius // 2), fill=(31, 119, 164))
+    if active("precipitation"):
+        for i in range(8):
+            t = (progress + i / 8) % 1
+            x = round(width * (0.62 + 0.16 * (i % 4) / 4))
+            y = round(height * (0.34 + 0.31 * t))
+            _draw_drop(draw, x, y, radius, colors["precipitation"])
+    if active("collection"):
+        for i in range(7):
+            t = (progress + i / 7) % 1
+            x = round(width * (0.70 - 0.07 * t))
+            y = round(height * (0.65 + 0.12 * t))
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius),
+                         fill=colors["collection"])
+
+    image.save(out)
+
+
+def animated_water_cycle(scene: dict, project_title: str, size: tuple[int, int],
+                         theme: str, out_dir: Path, fps: int = 8,
+                         loop_seconds: int = 4) -> list[tuple[Path, float]]:
+    """Create a short looping, phase-focused water-cycle animation from drawn frames."""
+    phase = water_cycle_phase(scene.get("heading", ""))
+    count = fps * loop_seconds
+    frame_duration = 1 / fps
+    frames = []
+    render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))
+    for index in range(count):
+        path = out_dir / f"water_cycle_{index:03d}.png"
+        _draw_water_cycle_frame(scene, project_title, render_size, theme, phase,
+                                index / count, path)
+        frames.append((path, frame_duration))
     return frames
 
 

@@ -28,6 +28,30 @@ def piper_voices() -> list[str]:
     return sorted(p.stem for p in config.VOICES_DIR.glob("*.onnx"))
 
 
+def sapi_voices() -> list[str]:
+    if not config.IS_WINDOWS or not shutil.which("powershell"):
+        return []
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name } | ConvertTo-Json -Compress; "
+        "$s.Dispose()"
+    )
+    result = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
+    output = result.stdout.decode("utf-8-sig").strip()
+    if not output:
+        return []
+    try:
+        voices = json.loads(output)
+    except json.JSONDecodeError as e:
+        raise TTSError("Could not read the installed Windows voice list.") from e
+    if isinstance(voices, str):
+        voices = [voices]
+    if not isinstance(voices, list) or not all(isinstance(voice, str) for voice in voices):
+        raise TTSError("Windows returned an invalid installed voice list.")
+    return voices
+
+
 def available_backends() -> dict:
     return {
         "piper": bool(config.find_exe("piper") and piper_voices()),
@@ -56,9 +80,9 @@ def choose_backend(pref: str = "auto") -> str:
 
 
 def check_language(lang: str, backend: str, voice: str) -> None:
-    if lang == "ur-roman":
-        raise TTSError("Roman Urdu cannot be sent to TTS directly. Convert it to Urdu script, review the "
-                       "text, then set the language to 'ur'.")
+    if lang == "ur-roman" and backend != "sapi":
+        raise TTSError("Roman Urdu preview and narration use a Windows SAPI English voice. Select the Windows "
+                       "voice engine; pronunciation may be approximate.")
     if lang == "ur" and backend == "piper" and not voice.lower().startswith("ur"):
         raise TTSError("Urdu narration needs an Urdu voice model in vendor/voices (file name starting with 'ur'). "
                        "Without one, pronunciation would be wrong. Use English narration with Urdu subtitles instead.")
@@ -137,7 +161,13 @@ def _normalize(src: Path, dst: Path) -> None:
 
 
 def synth_sentence(text: str, lang: str, settings: dict, cache_dir: Path) -> tuple[Path, str]:
-    backend = choose_backend(settings.get("tts_backend", "auto"))
+    preferred = settings.get("tts_backend", "auto")
+    if lang == "ur-roman" and preferred == "auto":
+        if not available_backends()["sapi"]:
+            raise TTSError("Roman Urdu needs Windows SAPI. This computer does not have Windows SAPI available.")
+        backend = "sapi"
+    else:
+        backend = choose_backend(preferred)
     voice = settings.get("voice", "") or ""
     speed = float(settings.get("speed", 1.0))
     check_language(lang, backend, voice)

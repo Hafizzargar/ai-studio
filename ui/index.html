@@ -48,10 +48,11 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
   <label for="n-mode">Mode</label>
   <select id="n-mode"><option value="educational">Educational</option><option value="documentary">Documentary</option><option value="history">Animated history</option><option value="creative">Creative</option></select>
   <label for="n-lang">Language</label>
-  <select id="n-lang"><option value="en">English</option><option value="ur">Urdu (script, needs Urdu voice)</option></select>
+  <select id="n-lang"><option value="en">English</option><option value="ur-roman">Roman Urdu (Windows voice, approximate)</option><option value="ur">Urdu script (needs Urdu voice)</option></select>
   <label for="n-aspect">Aspect ratio</label>
   <select id="n-aspect"><option>16:9</option><option>9:16</option><option>1:1</option></select>
-  <div class="row"><button class="primary" id="create">Create project</button></div>
+  <div class="row"><button class="primary" id="create">Create project</button><button id="water-cycle">Create water-cycle lesson</button></div>
+  <p class="hint">The water-cycle starter includes six narrated scenes with the moving illustration selected. English only.</p>
 </aside>
 <main>
   <div id="banner"></div>
@@ -60,12 +61,15 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
     <section>
       <h2 id="ptitle"></h2>
       <div class="row">
-        <div style="flex:1;min-width:140px"><label for="s-backend">Voice engine</label><select id="s-backend"><option>auto</option><option>piper</option><option>sapi</option><option>espeak</option><option>silent</option></select></div>
-        <div style="flex:1;min-width:140px"><label for="s-voice">Voice (Piper model name)</label><input id="s-voice" placeholder="en_US-lessac-medium"></div>
+        <div style="flex:1;min-width:140px"><label for="s-lang">Narration language</label><select id="s-lang"><option value="en">English</option><option value="ur-roman">Roman Urdu</option><option value="ur">Urdu script</option></select></div>
+        <div style="flex:1;min-width:140px"><label for="s-backend">Voice engine</label><select id="s-backend"><option value="auto">Auto</option><option value="piper">Piper</option><option value="sapi">Windows voices</option><option value="espeak">eSpeak</option><option value="silent">Silent (test only)</option></select></div>
+        <div style="flex:1;min-width:180px"><label for="s-voice">Voice</label><select id="s-voice"></select></div>
         <div style="width:110px"><label for="s-speed">Speed</label><input id="s-speed" type="number" step="0.1" min="0.5" max="2"></div>
         <div style="width:110px"><label for="s-res">Resolution</label><select id="s-res"><option>720p</option><option>1080p</option></select></div>
         <div style="width:90px"><label for="s-fps">FPS</label><select id="s-fps"><option>24</option><option>25</option><option>30</option></select></div>
       </div>
+      <p id="voice-note" class="hint"></p>
+      <div class="row"><button id="voice-demo">Preview selected voice</button></div>
     </section>
     <section>
       <h2>1. Script or PDF</h2>
@@ -81,7 +85,7 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
     <section>
       <h2>2. Review scenes</h2>
       <p class="hint">Edit the text, then render. Only changed scenes are rendered again.</p>
-      <table><thead><tr><th>ID</th><th>Heading and narration</th><th>Camera</th><th>Status</th><th></th></tr></thead><tbody id="scenes"></tbody></table>
+      <table><thead><tr><th>ID</th><th>Heading and narration</th><th>Visual</th><th>Camera</th><th>Status</th><th></th></tr></thead><tbody id="scenes"></tbody></table>
     </section>
     <section>
       <h2>3. Render</h2>
@@ -93,35 +97,53 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
   </div>
 </main>
 <script>
-const $=s=>document.querySelector(s);let P=null,jobs={},timer=null,saveT=null,pollT=null;
+const $=s=>document.querySelector(s);let P=null,jobs={},timer=null,saveT=null,pollT=null,voiceOptions={sapi:[],piper:[]};
 const api=async(u,o={})=>{const r=await fetch(u,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r};
 const J=(u,b,m='POST')=>api(u,{method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json());
 const el=(t,p={},...k)=>{const e=Object.assign(document.createElement(t),p);k.forEach(c=>e.append(c));return e};
 const err=e=>alert(e.message||e);
 
 async function health(){const h=await (await api('/api/health')).json();const b=$('#banner');b.innerHTML='';
+  voiceOptions={sapi:h.sapi_voices||[],piper:h.piper_voices||[]};
   const real=['piper','sapi','espeak'].some(k=>h.tts_backends[k]);
   if(!h.ffmpeg)b.append(el('div',{className:'banner',textContent:'ffmpeg was not found. Put ffmpeg.exe in the vendor folder, then restart.'}));
-  if(!real)b.append(el('div',{className:'banner',textContent:'No speech engine found. Videos will be silent. Install Piper and a voice (see README) or use Windows SAPI.'}))}
+  if(!real)b.append(el('div',{className:'banner',textContent:'No speech engine found. Videos will be silent. Install Piper and a voice (see README) or use Windows SAPI.'}));
+  if(P)fillVoices(P.settings.voice)}
+function fillVoices(selected=''){const select=$('#s-voice');if(!select)return;select.innerHTML='';
+  select.append(el('option',{value:'',textContent:'System default voice'}));
+  const lang=$('#s-lang').value,backend=$('#s-backend').value;
+  const groups=lang==='ur-roman'?['sapi']:backend==='sapi'?['sapi']:backend==='piper'?['piper']:['sapi','piper'];
+  groups.forEach(kind=>voiceOptions[kind].forEach(name=>{const value=kind==='sapi'?'sapi:'+name:name;
+    select.append(el('option',{value,textContent:kind==='sapi'?name:`Piper: ${name}`}))}));
+  if(selected&&!Array.from(select.options).some(o=>o.value===selected))
+    select.append(el('option',{value:selected,textContent:`Saved voice: ${selected}`}));
+  select.value=selected;
+  if(lang==='ur-roman')$('#voice-note').textContent='Roman Urdu is read as typed by the selected Windows voice. Pronunciation may be approximate; use the Hear button to preview each scene.';
+  else if(lang==='ur')$('#voice-note').textContent='Urdu script needs a compatible Urdu voice. The app will report an error if the selected voice cannot speak Urdu.';
+  else $('#voice-note').textContent='Choose an installed voice, then preview it or use Hear on a scene.'}
 async function list(){const ps=await (await api('/api/projects')).json();const box=$('#projects');box.innerHTML='';
   ps.forEach(p=>{const b=el('button',{className:'proj'+(P&&P.id===p.id?' active':'')},p.title,el('small',{textContent:`${p.mode}, ${p.scenes} scenes`}));b.onclick=()=>open(p.id);box.append(b)});
   if(!ps.length)box.append(el('p',{className:'hint',textContent:'No projects yet.'}))}
 async function open(id){P=await (await api('/api/projects/'+id)).json();$('#empty').hidden=true;$('#work').hidden=false;$('#ptitle').textContent=P.title;
-  const s=P.settings;$('#s-backend').value=s.tts_backend;$('#s-voice').value=s.voice;$('#s-speed').value=s.speed;$('#s-res').value=s.resolution;$('#s-fps').value=String(s.fps);
+  const s=P.settings;$('#s-lang').value=s.language||'en';$('#s-backend').value=s.tts_backend;$('#s-speed').value=s.speed;$('#s-res').value=s.resolution;$('#s-fps').value=String(s.fps);fillVoices(s.voice);
   try{$('#script').value=await (await api(`/api/projects/${id}/source-script`)).text()}catch{$('#script').value=P.scenes.map(x=>`# ${x.heading}\n${x.narration}`).join('\n\n')}
   $('#result').innerHTML='';drawScenes();list();poll(true)}
 function sched(){clearTimeout(saveT);saveT=setTimeout(save,800)}
-async function save(){if(!P)return;P.settings.tts_backend=$('#s-backend').value;P.settings.voice=$('#s-voice').value;P.settings.speed=parseFloat($('#s-speed').value)||1;
+async function save(){if(!P)return;const language=$('#s-lang').value;if(P.settings.language!==language)P.scenes.forEach(sc=>sc.language=language);P.settings.language=language;
+  P.settings.tts_backend=$('#s-backend').value;P.settings.voice=$('#s-voice').value;P.settings.speed=parseFloat($('#s-speed').value)||1;
   P.settings.resolution=$('#s-res').value;P.settings.fps=parseInt($('#s-fps').value);try{await J('/api/projects/'+P.id,P,'PUT')}catch(e){err(e)}}
 function drawScenes(){const tb=$('#scenes');tb.innerHTML='';
-  if(!P.scenes.length)tb.append(el('tr',{},el('td',{colSpan:5,className:'hint',textContent:'No scenes yet. Paste a script and choose Split into scenes.'})));
+  if(!P.scenes.length)tb.append(el('tr',{},el('td',{colSpan:6,className:'hint',textContent:'No scenes yet. Paste a script and choose Split into scenes.'})));
   P.scenes.forEach(sc=>{const h=el('input',{value:sc.heading,ariaLabel:'Heading '+sc.scene_id});h.oninput=()=>{sc.heading=h.value;sched()};
     const n=el('textarea',{value:sc.narration,rows:3,ariaLabel:'Narration '+sc.scene_id});n.oninput=()=>{sc.narration=n.value;sched()};
+    const v=el('select',{ariaLabel:'Visual style '+sc.scene_id});
+    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value})));
+    v.onchange=()=>{sc.visual={...(sc.visual||{}),type:v.value};sched()};
     const c=el('select',{ariaLabel:'Camera '+sc.scene_id});['slow_zoom_in','slow_zoom_out','none'].forEach(v=>c.append(el('option',{value:v,textContent:v.replaceAll('_',' '),selected:(sc.camera||{}).move===v})));c.onchange=()=>{sc.camera={move:c.value};sched()};
     const j=jobs[sc.scene_id];const b=el('span',{className:'badge '+(j?j.status:''),textContent:j?j.status:'new',title:j&&j.error||''});
     const pv=el('button',{textContent:'Hear'});pv.onclick=async()=>{try{await save();const r=await api(`/api/projects/${P.id}/preview-audio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:sc.narration})});new Audio(URL.createObjectURL(await r.blob())).play()}catch(e){err(e)}};
     const rr=el('button',{textContent:'Re-render'});rr.onclick=()=>render(false,[sc.scene_id]);
-    tb.append(el('tr',{},el('td',{className:'id',textContent:sc.scene_id}),el('td',{},h,n),el('td',{className:'cam'},c),el('td',{className:'st'},b),el('td',{},pv,' ',rr)))})}
+    tb.append(el('tr',{},el('td',{className:'id',textContent:sc.scene_id}),el('td',{},h,n),el('td',{className:'cam'},v),el('td',{className:'cam'},c),el('td',{className:'st'},b),el('td',{},pv,' ',rr)))})}
 async function render(force,scenes){try{await save();await J(`/api/projects/${P.id}/render`,{force,scenes:scenes||null});poll()}catch(e){err(e)}}
 async function poll(once){clearTimeout(pollT);if(!P)return;const s=await (await api(`/api/projects/${P.id}/status`)).json();jobs={};s.jobs.forEach(j=>jobs[j.scene_id]=j);
   const p=s.progress;$('#bar').max=p.total||1;$('#bar').value=p.done||0;$('#rmsg').textContent=p.message||'';
@@ -133,15 +155,23 @@ async function showResult(p){const r=$('#result');r.innerHTML='';
   if(p.status==='done'){r.append(el('video',{controls:true,src:`/api/projects/${P.id}/video?t=${Date.now()}`}),el('div',{className:'row'},el('a',{href:`/api/projects/${P.id}/video`,textContent:'Download MP4'}),el('a',{href:`/api/projects/${P.id}/srt`,textContent:'Download subtitles (SRT)'})))}
   else r.append(el('p',{className:'banner',textContent:p.status==='interrupted'?'The last render was interrupted. Press Render video to continue; finished scenes are kept.':(p.message||'Render failed. See the log below.')}))}
 
-$('#create').onclick=async()=>{const t=$('#n-title').value.trim();if(!t)return alert('Enter a title');
-  try{const p=await J('/api/projects',{title:t,mode:$('#n-mode').value,language:$('#n-lang').value,aspect:$('#n-aspect').value});$('#n-title').value='';await open(p.id)}catch(e){err(e)}};
+async function createProject(template){const t=$('#n-title').value.trim()||(template?'The Water Cycle':'');if(!t)return alert('Enter a title');
+  try{const body={title:t,mode:$('#n-mode').value,language:$('#n-lang').value,aspect:$('#n-aspect').value};
+  if(template)body.template=template;const p=await J('/api/projects',body);$('#n-title').value='';await open(p.id)}catch(e){err(e)}}
+$('#create').onclick=()=>createProject(null);
+$('#water-cycle').onclick=()=>createProject('water_cycle');
 $('#segment').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/segment`,{script:$('#script').value});jobs={};drawScenes();list()}catch(e){err(e)}};
 $('#pdf').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
   try{const a=await (await api(`/api/projects/${P.id}/pdf`,{method:'POST',body:fd})).json();
   $('#pdfinfo').textContent=`${a.title}: ${a.page_count} pages, ${a.headings.length} headings, ${a.definitions.length} definitions found.`+(a.warnings.length?' '+a.warnings.join(' '):'')}catch(e){err(e)}};
 $('#draft').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/pdf/draft`,{});jobs={};drawScenes();list()}catch(e){err(e)}};
 $('#render').onclick=()=>render(false);$('#force').onclick=()=>render(true);
-['s-backend','s-voice','s-speed','s-res','s-fps'].forEach(i=>$('#'+i).addEventListener('change',sched));
+$('#s-backend').addEventListener('change',()=>{fillVoices($('#s-voice').value);sched()});
+$('#s-lang').addEventListener('change',()=>{if($('#s-lang').value==='ur-roman'){if(!$('#s-voice').value.startsWith('sapi:'))$('#s-voice').value='';$('#s-backend').value='sapi'}fillVoices($('#s-voice').value);sched()});
+$('#s-voice').addEventListener('change',()=>{if($('#s-voice').value.startsWith('sapi:'))$('#s-backend').value='sapi';else if($('#s-voice').value&&!$('#s-voice').value.startsWith('sapi:'))$('#s-backend').value='piper';sched()});
+['s-speed','s-res','s-fps'].forEach(i=>$('#'+i).addEventListener('change',sched));
+$('#voice-demo').onclick=async()=>{if(!P)return;try{await save();const text=$('#s-lang').value==='ur-roman'?'Assalam-o-alaikum! Yeh Roman Urdu awaaz ka demo hai. Main aap ke matn ko English voice ke saath parh raha hoon.':$('#s-lang').value==='ur'?'یہ آواز کا ایک مختصر نمونہ ہے۔':'Hello! This is a sample of the selected voice.';
+  const r=await api(`/api/projects/${P.id}/preview-audio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});const audio=new Audio(URL.createObjectURL(await r.blob()));audio.play()}catch(e){err(e)}};
 health();list();
 </script>
 </body>

@@ -18,7 +18,7 @@ KEEP_BACKUPS = 5
 
 def default_settings() -> dict:
     return {
-        "language": "en",            # en | ur | ur-roman (ur-roman is blocked until reviewed)
+        "language": "en",            # en | ur | ur-roman
         "voice": "",                 # piper voice name (file stem in vendor/voices) or "sapi:<name>"
         "tts_backend": "auto",       # auto | piper | sapi | espeak | silent
         "speed": 1.0,

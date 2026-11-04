@@ -4,7 +4,7 @@ import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 
-from aistudio import config, pdfio, project
+from aistudio import config, pdfio, project, tts
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +40,63 @@ def test_highlight_rects_found(tmp_path):
     make_pdf(pdf)
     page = pymupdf.open(str(pdf))[0]
     assert pdfio.find_highlights(page, ["It takes place in the chloroplasts of green leaves."])
+
+
+def test_roman_urdu_language_and_windows_voice_list(monkeypatch):
+    from aistudio.server import app
+
+    monkeypatch.setattr(tts, "sapi_voices", lambda: ["Microsoft Zira Desktop"])
+    client = TestClient(app)
+    response = client.post("/api/projects", json={
+        "title": "Roman Urdu", "language": "ur-roman", "tts_backend": "auto",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["settings"]["language"] == "ur-roman"
+    assert client.get("/api/health").json()["sapi_voices"] == ["Microsoft Zira Desktop"]
+
+
+def test_water_cycle_lesson_template_creates_animated_scenes():
+    from aistudio.server import app
+
+    client = TestClient(app)
+    response = client.post("/api/projects", json={
+        "title": "Water Cycle Lesson", "template": "water_cycle", "tts_backend": "silent",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["scenes"]) == 6
+    assert [scene["heading"] for scene in data["scenes"]] == [
+        "Introduction", "Evaporation", "Condensation", "Precipitation", "Collection", "Summary",
+    ]
+    assert all(scene["visual"]["type"] == "water_cycle" for scene in data["scenes"])
+    assert (project.project_dir(data["id"]) / "source" / "script.txt").read_text(
+        encoding="utf-8").startswith("# Introduction")
+
+    unsupported_language = client.post("/api/projects", json={
+        "title": "Urdu Water Cycle", "template": "water_cycle", "language": "ur",
+    })
+    assert unsupported_language.status_code == 400
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_water_cycle_lesson_renders_animation_to_video():
+    from aistudio import render
+    from aistudio.server import app
+
+    client = TestClient(app)
+    data = client.post("/api/projects", json={
+        "title": "Water Cycle Render", "template": "water_cycle", "tts_backend": "silent",
+    }).json()
+    data["scenes"] = data["scenes"][:1]
+    data["scenes"][0]["narration"] = "Water moves around Earth."
+    project.save(data["id"], data)
+
+    result = render.render_project(data["id"])
+
+    assert result["ok"] and result["valid"]
+    assert (project.project_dir(data["id"]) / "scenes" / "s001" / "water_cycle.mp4").exists()
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
