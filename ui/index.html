@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Studio</title>
+<style>
+:root{--ink:#172a3a;--muted:#5b6b7a;--bg:#e8edf2;--panel:#fbfcfd;--line:#cfd8e1;--accent:#0b7285;--accent-ink:#fff;--bad:#b42318;--ok:#1a7f4b;--warn:#9a6700;--r:6px}
+@media (prefers-color-scheme:dark){:root{--ink:#e6edf3;--muted:#9aa9b8;--bg:#10181f;--panel:#17222c;--line:#2b3a47;--accent:#3cb4c8;--accent-ink:#04222a;--bad:#ff8a80;--ok:#5fd394;--warn:#e3b341}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Segoe UI",system-ui,sans-serif;display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow:auto}
+main{padding:20px 24px;max-width:1100px}
+h1{font-size:18px;margin:0 0 12px}h2{font-size:15px;margin:0 0 10px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:16px}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 2px}
+input,select,textarea,button{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+textarea{min-height:90px;resize:vertical}
+button{padding:6px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.proj{display:block;width:100%;text-align:left;margin:4px 0}
+.proj.active{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.proj small{display:block;color:var(--muted)}
+.banner{padding:8px 12px;border-radius:var(--r);margin-bottom:12px;border:1px solid var(--warn);color:var(--warn)}
+table{width:100%;border-collapse:collapse}
+td,th{padding:6px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+th{font-size:12px;color:var(--muted);font-weight:600}
+td.id{white-space:nowrap;width:56px}td.cam{width:130px}td.st{width:110px}
+.badge{font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--line)}
+.done{color:var(--ok);border-color:var(--ok)}.failed{color:var(--bad);border-color:var(--bad)}.running{color:var(--accent);border-color:var(--accent)}
+progress{width:100%;height:10px}
+video{width:100%;max-height:480px;background:#000;border-radius:var(--r)}
+pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;overflow:auto;font-size:12px;white-space:pre-wrap}
+.hint{color:var(--muted);font-size:12px}
+@media(max-width:800px){body{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<aside>
+  <h1>AI Studio</h1>
+  <div id="projects"></div>
+  <h2 style="margin-top:20px">New project</h2>
+  <label for="n-title">Title</label><input id="n-title" placeholder="e.g. The Water Cycle">
+  <label for="n-mode">Mode</label>
+  <select id="n-mode"><option value="educational">Educational</option><option value="documentary">Documentary</option><option value="history">Animated history</option><option value="creative">Creative</option></select>
+  <label for="n-lang">Language</label>
+  <select id="n-lang"><option value="en">English</option><option value="ur">Urdu (script, needs Urdu voice)</option></select>
+  <label for="n-aspect">Aspect ratio</label>
+  <select id="n-aspect"><option>16:9</option><option>9:16</option><option>1:1</option></select>
+  <div class="row"><button class="primary" id="create">Create project</button></div>
+</aside>
+<main>
+  <div id="banner"></div>
+  <div id="empty"><section><h2>Open or create a project</h2><p class="hint">Projects are saved on this computer in the <code>projects</code> folder and autosave while you edit.</p></section></div>
+  <div id="work" hidden>
+    <section>
+      <h2 id="ptitle"></h2>
+      <div class="row">
+        <div style="flex:1;min-width:140px"><label for="s-backend">Voice engine</label><select id="s-backend"><option>auto</option><option>piper</option><option>sapi</option><option>espeak</option><option>silent</option></select></div>
+        <div style="flex:1;min-width:140px"><label for="s-voice">Voice (Piper model name)</label><input id="s-voice" placeholder="en_US-lessac-medium"></div>
+        <div style="width:110px"><label for="s-speed">Speed</label><input id="s-speed" type="number" step="0.1" min="0.5" max="2"></div>
+        <div style="width:110px"><label for="s-res">Resolution</label><select id="s-res"><option>720p</option><option>1080p</option></select></div>
+        <div style="width:90px"><label for="s-fps">FPS</label><select id="s-fps"><option>24</option><option>25</option><option>30</option></select></div>
+      </div>
+    </section>
+    <section>
+      <h2>1. Script or PDF</h2>
+      <label for="script">Script. Start a line with # to set a scene heading.</label>
+      <textarea id="script" rows="8"></textarea>
+      <div class="row">
+        <button class="primary" id="segment">Split into scenes</button>
+        <input type="file" id="pdf" accept=".pdf" style="width:auto">
+        <button id="draft">Draft scenes from PDF</button>
+      </div>
+      <div id="pdfinfo" class="hint"></div>
+    </section>
+    <section>
+      <h2>2. Review scenes</h2>
+      <p class="hint">Edit the text, then render. Only changed scenes are rendered again.</p>
+      <table><thead><tr><th>ID</th><th>Heading and narration</th><th>Camera</th><th>Status</th><th></th></tr></thead><tbody id="scenes"></tbody></table>
+    </section>
+    <section>
+      <h2>3. Render</h2>
+      <div class="row"><button class="primary" id="render">Render video</button><button id="force">Render everything again</button><span id="rmsg" class="hint"></span></div>
+      <progress id="bar" value="0" max="1" style="margin-top:10px"></progress>
+      <div id="result"></div>
+      <pre id="log" hidden></pre>
+    </section>
+  </div>
+</main>
+<script>
+const $=s=>document.querySelector(s);let P=null,jobs={},timer=null,saveT=null,pollT=null;
+const api=async(u,o={})=>{const r=await fetch(u,o);if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r};
+const J=(u,b,m='POST')=>api(u,{method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json());
+const el=(t,p={},...k)=>{const e=Object.assign(document.createElement(t),p);k.forEach(c=>e.append(c));return e};
+const err=e=>alert(e.message||e);
+
+async function health(){const h=await (await api('/api/health')).json();const b=$('#banner');b.innerHTML='';
+  const real=['piper','sapi','espeak'].some(k=>h.tts_backends[k]);
+  if(!h.ffmpeg)b.append(el('div',{className:'banner',textContent:'ffmpeg was not found. Put ffmpeg.exe in the vendor folder, then restart.'}));
+  if(!real)b.append(el('div',{className:'banner',textContent:'No speech engine found. Videos will be silent. Install Piper and a voice (see README) or use Windows SAPI.'}))}
+async function list(){const ps=await (await api('/api/projects')).json();const box=$('#projects');box.innerHTML='';
+  ps.forEach(p=>{const b=el('button',{className:'proj'+(P&&P.id===p.id?' active':'')},p.title,el('small',{textContent:`${p.mode}, ${p.scenes} scenes`}));b.onclick=()=>open(p.id);box.append(b)});
+  if(!ps.length)box.append(el('p',{className:'hint',textContent:'No projects yet.'}))}
+async function open(id){P=await (await api('/api/projects/'+id)).json();$('#empty').hidden=true;$('#work').hidden=false;$('#ptitle').textContent=P.title;
+  const s=P.settings;$('#s-backend').value=s.tts_backend;$('#s-voice').value=s.voice;$('#s-speed').value=s.speed;$('#s-res').value=s.resolution;$('#s-fps').value=String(s.fps);
+  try{$('#script').value=await (await api(`/api/projects/${id}/source-script`)).text()}catch{$('#script').value=P.scenes.map(x=>`# ${x.heading}\n${x.narration}`).join('\n\n')}
+  $('#result').innerHTML='';drawScenes();list();poll(true)}
+function sched(){clearTimeout(saveT);saveT=setTimeout(save,800)}
+async function save(){if(!P)return;P.settings.tts_backend=$('#s-backend').value;P.settings.voice=$('#s-voice').value;P.settings.speed=parseFloat($('#s-speed').value)||1;
+  P.settings.resolution=$('#s-res').value;P.settings.fps=parseInt($('#s-fps').value);try{await J('/api/projects/'+P.id,P,'PUT')}catch(e){err(e)}}
+function drawScenes(){const tb=$('#scenes');tb.innerHTML='';
+  if(!P.scenes.length)tb.append(el('tr',{},el('td',{colSpan:5,className:'hint',textContent:'No scenes yet. Paste a script and choose Split into scenes.'})));
+  P.scenes.forEach(sc=>{const h=el('input',{value:sc.heading,ariaLabel:'Heading '+sc.scene_id});h.oninput=()=>{sc.heading=h.value;sched()};
+    const n=el('textarea',{value:sc.narration,rows:3,ariaLabel:'Narration '+sc.scene_id});n.oninput=()=>{sc.narration=n.value;sched()};
+    const c=el('select',{ariaLabel:'Camera '+sc.scene_id});['slow_zoom_in','slow_zoom_out','none'].forEach(v=>c.append(el('option',{value:v,textContent:v.replaceAll('_',' '),selected:(sc.camera||{}).move===v})));c.onchange=()=>{sc.camera={move:c.value};sched()};
+    const j=jobs[sc.scene_id];const b=el('span',{className:'badge '+(j?j.status:''),textContent:j?j.status:'new',title:j&&j.error||''});
+    const pv=el('button',{textContent:'Hear'});pv.onclick=async()=>{try{await save();const r=await api(`/api/projects/${P.id}/preview-audio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:sc.narration})});new Audio(URL.createObjectURL(await r.blob())).play()}catch(e){err(e)}};
+    const rr=el('button',{textContent:'Re-render'});rr.onclick=()=>render(false,[sc.scene_id]);
+    tb.append(el('tr',{},el('td',{className:'id',textContent:sc.scene_id}),el('td',{},h,n),el('td',{className:'cam'},c),el('td',{className:'st'},b),el('td',{},pv,' ',rr)))})}
+async function render(force,scenes){try{await save();await J(`/api/projects/${P.id}/render`,{force,scenes:scenes||null});poll()}catch(e){err(e)}}
+async function poll(once){clearTimeout(pollT);if(!P)return;const s=await (await api(`/api/projects/${P.id}/status`)).json();jobs={};s.jobs.forEach(j=>jobs[j.scene_id]=j);
+  const p=s.progress;$('#bar').max=p.total||1;$('#bar').value=p.done||0;$('#rmsg').textContent=p.message||'';
+  const lg=await (await api(`/api/projects/${P.id}/log`)).json();$('#log').hidden=!lg.log;$('#log').textContent=lg.log;
+  const run=p.status==='running';$('#render').disabled=run;$('#force').disabled=run;drawScenes();
+  if(p.status==='done'||p.status==='failed'||p.status==='interrupted'){showResult(p)}
+  if(run||(!once&&!['done','failed','interrupted','idle'].includes(p.status)))pollT=setTimeout(()=>poll(),2000)}
+async function showResult(p){const r=$('#result');r.innerHTML='';
+  if(p.status==='done'){r.append(el('video',{controls:true,src:`/api/projects/${P.id}/video?t=${Date.now()}`}),el('div',{className:'row'},el('a',{href:`/api/projects/${P.id}/video`,textContent:'Download MP4'}),el('a',{href:`/api/projects/${P.id}/srt`,textContent:'Download subtitles (SRT)'})))}
+  else r.append(el('p',{className:'banner',textContent:p.status==='interrupted'?'The last render was interrupted. Press Render video to continue; finished scenes are kept.':(p.message||'Render failed. See the log below.')}))}
+
+$('#create').onclick=async()=>{const t=$('#n-title').value.trim();if(!t)return alert('Enter a title');
+  try{const p=await J('/api/projects',{title:t,mode:$('#n-mode').value,language:$('#n-lang').value,aspect:$('#n-aspect').value});$('#n-title').value='';await open(p.id)}catch(e){err(e)}};
+$('#segment').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/segment`,{script:$('#script').value});jobs={};drawScenes();list()}catch(e){err(e)}};
+$('#pdf').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+  try{const a=await (await api(`/api/projects/${P.id}/pdf`,{method:'POST',body:fd})).json();
+  $('#pdfinfo').textContent=`${a.title}: ${a.page_count} pages, ${a.headings.length} headings, ${a.definitions.length} definitions found.`+(a.warnings.length?' '+a.warnings.join(' '):'')}catch(e){err(e)}};
+$('#draft').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/pdf/draft`,{});jobs={};drawScenes();list()}catch(e){err(e)}};
+$('#render').onclick=()=>render(false);$('#force').onclick=()=>render(true);
+['s-backend','s-voice','s-speed','s-res','s-fps'].forEach(i=>$('#'+i).addEventListener('change',sched));
+health();list();
+</script>
+</body>
+</html>

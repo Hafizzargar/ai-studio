@@ -1,0 +1,175 @@
+import json
+import shutil
+import wave
+
+from PIL import Image
+import pytest
+
+from aistudio import config, project, scenes, subtitles, tts, jobs, visuals
+
+
+@pytest.fixture(autouse=True)
+def tmp_projects(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROJECTS_DIR", tmp_path / "projects")
+    return tmp_path
+
+
+def test_sentence_split_handles_abbreviations():
+    s = scenes.split_sentences("Dr. Singh arrived. He spoke e.g. about water! Did it rain? Yes.")
+    assert s == ["Dr. Singh arrived.", "He spoke e.g. about water!", "Did it rain?", "Yes."]
+
+
+def test_urdu_sentence_split():
+    assert len(scenes.split_sentences("یہ پہلا جملہ ہے۔ یہ دوسرا جملہ ہے۔")) == 2
+
+
+def test_script_to_scenes_headings_and_chunking():
+    text = "# One\n" + " ".join(["Word word word word word."] * 30) + "\n\n# Two\nShort scene."
+    sc = scenes.script_to_scenes(text, max_words=50)
+    assert sc[0]["heading"] == "One" and sc[-1]["heading"] == "Two"
+    assert len(sc) >= 3
+    assert all(len(s["narration"].split()) <= 55 for s in sc)
+
+
+def test_title_card_draws_diagram_from_scene_narration(tmp_path):
+    scene = scenes.new_scene(
+        1,
+        "Condensation",
+        "Water vapour cools into tiny droplets. The droplets gather to form clouds.",
+    )
+    labels = visuals._diagram_labels(scene)
+    assert labels == ["Water vapour", "tiny droplets", "clouds"]
+
+    output = tmp_path / "diagram.png"
+    visuals.title_card(scene, 1, 1, "Water Cycle", (1280, 720), "educational", output)
+    with Image.open(output) as image:
+        assert image.size == (1920, 1080)
+        colors = image.convert("RGB").getcolors(image.width * image.height)
+        assert colors is not None
+        assert any(color[0] < 30 and color[1] < 55 and color[2] < 70 and count > 1000
+                   for count, color in colors)
+
+    portrait = tmp_path / "portrait-diagram.png"
+    visuals.title_card(scene, 1, 1, "Water Cycle", (720, 1280), "educational", portrait)
+    with Image.open(portrait) as image:
+        assert image.size == (1080, 1920)
+        colors = image.convert("RGB").getcolors(image.width * image.height)
+        assert colors is not None
+        assert any(color[0] < 30 and color[1] < 55 and color[2] < 70 and count > 1000
+                   for count, color in colors)
+
+
+def test_diagram_reveals_and_highlights_concepts_at_spoken_words():
+    scene = scenes.new_scene(
+        1,
+        "Evaporation",
+        "The water cycle begins. Evaporation starts. Vapour cools. Tiny droplets form clouds.",
+    )
+    cues = [
+        {"start": 0.0, "end": 2.0, "text": "The water cycle begins."},
+        {"start": 2.0, "end": 4.0, "text": "Evaporation starts."},
+        {"start": 4.0, "end": 6.0, "text": "Vapour cools."},
+        {"start": 6.0, "end": 9.0, "text": "Tiny droplets form clouds."},
+    ]
+    title = "Water Cycle SAPI Test"
+    labels = visuals._diagram_labels(scene, project_title=title)
+    states = visuals.diagram_timeline(scene, cues, project_title=title)
+    active_labels = [labels[state[2]] for state in states if state[2] is not None]
+
+    assert labels[0] == "Water Cycle"
+    assert "Evaporation" in labels
+    assert active_labels[:2] == ["Water Cycle", "Evaporation"]
+    assert sum(state[0] for state in states) == pytest.approx(9.0)
+    landscape = visuals._diagram_layout((1920, 1080), labels)
+    portrait = visuals._diagram_layout((1080, 1920), labels)
+    assert landscape[0][0] < landscape[1][0]
+    assert len({box[0] for box in landscape[1:]}) == 1
+    assert len({box[1] for box in portrait}) == len(portrait)
+
+
+def test_hash_changes_only_when_relevant():
+    p = project.default_settings()
+    s = scenes.new_scene(1, "A", "Hello there.")
+    h1 = scenes.scene_hash(s, p)
+    s["status"] = "approved"
+    assert scenes.scene_hash(s, p) == h1
+    s["narration"] = "Hello again."
+    assert scenes.scene_hash(s, p) != h1
+    assert scenes.scene_hash(s, p, "Water Cycle") != scenes.scene_hash(s, p, "Photosynthesis")
+
+
+def test_project_save_backup_and_recover():
+    d = project.create("Crash test")
+    pid = d["id"]
+    for i in range(8):
+        d["title"] = f"v{i}"
+        project.save(pid, d)
+    assert len(list((project.project_dir(pid) / "backups").glob("*.json"))) <= project.KEEP_BACKUPS
+    (project.project_dir(pid) / "project.json").write_text("{corrupt", encoding="utf-8")
+    assert project.load(pid)["id"] == pid          # recovered from backup
+
+
+def test_invalid_project_id_rejected():
+    with pytest.raises(ValueError):
+        project.project_dir("../etc")
+
+
+def test_srt_and_ass(tmp_path):
+    cues = [{"start": 0.5, "end": 2.25, "text": "Hello {world}"}]
+    subtitles.write_srt(cues, tmp_path / "a.srt")
+    assert "00:00:00,500 --> 00:00:02,250" in (tmp_path / "a.srt").read_text()
+    subtitles.write_ass(cues, tmp_path / "a.ass", 1280, 720, project.default_settings()["subtitles"])
+    ass = (tmp_path / "a.ass").read_text()
+    assert "Dialogue: 0,0:00:00.50,0:00:02.25" in ass and "{world}" not in ass
+
+
+def test_roman_urdu_is_blocked():
+    with pytest.raises(tts.TTSError):
+        tts.check_language("ur-roman", "piper", "x")
+
+
+def test_urdu_needs_urdu_voice():
+    with pytest.raises(tts.TTSError):
+        tts.check_language("ur", "piper", "en_US-lessac-medium")
+
+
+def test_silent_audio_cues_match_audio_length(tmp_path):
+    st = project.default_settings()
+    st["tts_backend"] = "silent"
+    cues, total, used = tts.build_scene_audio(["One two three.", "Four five six seven."], "en", st,
+                                              tmp_path / "c", tmp_path / "n.wav")
+    with wave.open(str(tmp_path / "n.wav")) as w:
+        assert abs(w.getnframes() / w.getframerate() - total) < 0.01
+    assert cues[0]["end"] <= cues[1]["start"]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_end_to_end_render_resume_and_failure(monkeypatch):
+    from aistudio import render
+    d = project.create("E2E", tts_backend="silent", resolution="720p")
+    d["scenes"] = scenes.script_to_scenes("# A\nFirst scene here.\n\n# B\nSecond scene here.")
+    project.save(d["id"], d)
+    res = render.render_project(d["id"])
+    assert res["ok"] and res["valid"] and res["drift_sec"] < 0.5
+
+    # second run: everything cached
+    calls = []
+    orig = render.render_scene
+    monkeypatch.setattr(render, "render_scene", lambda *a, **k: calls.append(1) or orig(*a, **k))
+    render.render_project(d["id"])
+    assert calls == []
+
+    # edit one scene: only that one re-renders
+    d = project.load(d["id"])
+    d["scenes"][1]["narration"] = "Second scene changed text."
+    project.save(d["id"], d)
+    render.render_project(d["id"])
+    assert len(calls) == 1
+
+    # a failing scene does not lose the others
+    d = project.load(d["id"])
+    d["scenes"][0]["narration"] = "   "
+    project.save(d["id"], d)
+    out = render.render_project(d["id"])
+    assert not out["ok"] and out["failed"][0]["scene_id"] == "s001"
+    assert jobs.get(d["id"], "s002")["status"] == "done"
