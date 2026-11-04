@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from . import config, jobs, lessons, pdfio, project, tts
 from .animation import (
     InstructionError,
+    instruction_status,
     narration_fingerprint,
     validate_instructions,
     validate_sentence_mappings,
@@ -29,6 +30,18 @@ def _load(pid: str) -> dict:
         return project.load(pid)
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(404, str(e))
+
+
+def _instruction_statuses(data: dict) -> dict[str, dict[str, str]]:
+    return {
+        scene["scene_id"]: dict(zip(("origin", "state"), instruction_status(scene)))
+        for scene in data.get("scenes", [])
+        if isinstance(scene.get("scene_id"), str)
+    }
+
+
+def _project_response(data: dict) -> dict:
+    return {**data, "_instruction_status": _instruction_statuses(data)}
 
 
 class NewProject(BaseModel):
@@ -116,7 +129,7 @@ def create_project(body: NewProject):
 
 @app.get("/api/projects/{pid}")
 def get_project(pid: str):
-    return _load(pid)
+    return _project_response(_load(pid))
 
 
 @app.put("/api/projects/{pid}")
@@ -124,8 +137,9 @@ def put_project(pid: str, body: dict):
     _load(pid)
     if body.get("id") != pid or not isinstance(body.get("scenes"), list):
         raise HTTPException(400, "Body must be a full project with matching id and a scenes list")
-    project.save(pid, project.migrate(body))
-    return {"saved": True}
+    data = {key: value for key, value in body.items() if key != "_instruction_status"}
+    project.save(pid, project.migrate(data))
+    return {"saved": True, "_instruction_status": _instruction_statuses(project.load(pid))}
 
 
 @app.post("/api/projects/{pid}/scenes/{scene_id}/instructions/review")
@@ -152,7 +166,8 @@ def review_instructions(pid: str, scene_id: str, body: InstructionReviewIn):
         "narration_hash": narration_fingerprint(scene["narration"]),
     }
     project.save(pid, p)
-    return {"saved": True, "scene": scene}
+    return {"saved": True, "scene": scene,
+            "instruction_status": dict(zip(("origin", "state"), instruction_status(scene)))}
 
 
 @app.post("/api/projects/{pid}/segment")

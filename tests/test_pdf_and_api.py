@@ -166,6 +166,73 @@ def test_changed_narration_blocks_render_until_manual_instruction_review():
     assert reviewed_scene["visual"]["instructions"]["narration"] == edited_scene["narration"]
 
 
+def test_instruction_status_api_uses_backend_fingerprint_and_does_not_persist_display_state():
+    from aistudio.server import app
+
+    client = TestClient(app)
+    data = client.post("/api/projects", json={
+        "title": "Instruction status", "template": "electric_circuit", "tts_backend": "silent",
+    }).json()
+    pid = data["id"]
+    response = client.get(f"/api/projects/{pid}")
+    assert response.json()["_instruction_status"]["s001"] == {
+        "origin": "generated",
+        "state": "current",
+    }
+
+    stale_project = response.json()
+    stale_project["scenes"][0]["visual"]["instruction_meta"]["narration_hash"] = "mismatch"
+    saved = client.put(f"/api/projects/{pid}", json=stale_project)
+
+    assert saved.status_code == 200
+    expected = {"origin": "generated", "state": "stale"}
+    assert saved.json()["_instruction_status"]["s001"] == expected
+    assert client.get(f"/api/projects/{pid}").json()["_instruction_status"]["s001"] == expected
+    persisted = project.load(pid)
+    assert "_instruction_status" not in persisted
+    assert all("_instruction_status" not in scene for scene in persisted["scenes"])
+
+
+def test_sentence_count_change_after_manual_review_requires_remapping():
+    from aistudio import render
+    from aistudio.animation import instruction_status
+    from aistudio.server import app
+
+    client = TestClient(app)
+    data = client.post("/api/projects", json={
+        "title": "Sentence count change", "template": "electric_circuit", "tts_backend": "silent",
+    }).json()
+    pid = data["id"]
+    scene = data["scenes"][0]
+    original_instructions = copy.deepcopy(scene["visual"]["instructions"])
+    reviewed = client.post(
+        f"/api/projects/{pid}/scenes/s001/instructions/review",
+        json={"instructions": original_instructions},
+    )
+    assert reviewed.status_code == 200
+
+    data = project.load(pid)
+    data["scenes"][0]["narration"] = "The circuit explanation has been rewritten."
+    assert len(data["scenes"][0]["narration"].split(". ")) == 1
+    assert client.put(f"/api/projects/{pid}", json=data).status_code == 200
+
+    stale_scene = project.load(pid)["scenes"][0]
+    assert instruction_status(stale_scene) == ("manual", "stale")
+    assert stale_scene["visual"]["instructions"]["animations"] == original_instructions["animations"]
+    with pytest.raises(render.RenderError, match="review and save"):
+        render.render_scene(project.load(pid), stale_scene, 1, len(data["scenes"]))
+
+    remap = client.post(
+        f"/api/projects/{pid}/scenes/s001/instructions/review",
+        json={"instructions": original_instructions},
+    )
+    assert remap.status_code == 400
+    assert "sentence_index is outside the narration" in remap.json()["detail"]
+    unchanged = project.load(pid)["scenes"][0]
+    assert unchanged["visual"]["instructions"]["animations"] == original_instructions["animations"]
+    assert instruction_status(unchanged) == ("manual", "stale")
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_instruction_scene_rendering_for_each_subject():
     from aistudio import lessons, render
