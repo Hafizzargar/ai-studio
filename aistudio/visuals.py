@@ -11,6 +11,7 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageFont, features
 
 from . import config
+from .animation import validate_instructions
 from .pdfio import find_highlights
 from .scenes import split_sentences
 
@@ -208,9 +209,254 @@ def _mix_color(base: tuple[int, int, int], color: tuple[int, int, int],
 def _arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int],
            color: tuple[int, int, int], width: int) -> None:
     draw.line((*start, *end), fill=color, width=width)
-    x, y = end
+    angle = math.atan2(end[1] - start[1], end[0] - start[0])
     size = max(8, width * 3)
-    draw.polygon(((x, y), (x - size, y - size // 2), (x - size, y + size // 2)), fill=color)
+    wing = math.pi / 6
+    points = [
+        (end[0] - round(size * math.cos(angle - wing)),
+         end[1] - round(size * math.sin(angle - wing))),
+        (end[0] - round(size * math.cos(angle + wing)),
+         end[1] - round(size * math.sin(angle + wing))),
+    ]
+    draw.polygon((end, *points), fill=color)
+
+
+_INSTRUCTION_LABELS = {
+    "sun": "Sun", "ocean": "Ocean", "water": "Water", "vapor": "Water vapour",
+    "cloud": "Cloud", "droplets": "Cloud droplets", "rain": "Rain", "snow": "Snow",
+    "river": "River", "ground": "Land", "groundwater": "Groundwater", "plant": "Plants",
+    "battery": "Battery", "wire": "Wire", "bulb": "Bulb", "open_switch": "Open switch",
+    "conventional_current": "Conventional current", "electrons": "Electron drift",
+    "three_estates": "Three estates", "financial_crisis": "Financial crisis",
+    "estates_general": "Estates-General", "national_assembly": "National Assembly",
+    "bastille": "Bastille", "republic": "Republic", "king_execution": "Louis XVI executed",
+    "reign_of_terror": "Reign of Terror", "directory": "Directory",
+    "napoleon_coup": "Napoleon's coup", "citizenship_rights": "Citizenship and rights",
+}
+_HISTORY_DATES = {
+    "estates_general": "5 May 1789", "national_assembly": "17 Jun 1789",
+    "bastille": "14 Jul 1789", "republic": "1792",
+    "king_execution": "1793", "reign_of_terror": "1793–94",
+    "directory": "1795", "napoleon_coup": "1799",
+}
+
+
+def _instruction_positions(scene_type: str, objects: list[str]) -> dict[str, tuple[float, float]]:
+    if scene_type == "science_process":
+        known = {
+            "sun": (0.13, 0.33), "ocean": (0.22, 0.75), "water": (0.22, 0.75),
+            "vapor": (0.39, 0.54), "plant": (0.39, 0.76), "cloud": (0.65, 0.34),
+            "droplets": (0.65, 0.47), "rain": (0.79, 0.56), "snow": (0.79, 0.56),
+            "ground": (0.81, 0.77), "river": (0.56, 0.78), "groundwater": (0.68, 0.83),
+        }
+        fallback_y = 0.63
+    elif scene_type == "electric_circuit":
+        known = {
+            "battery": (0.18, 0.52), "wire": (0.50, 0.27), "bulb": (0.82, 0.52),
+            "open_switch": (0.50, 0.76), "conventional_current": (0.50, 0.40),
+            "electrons": (0.50, 0.64),
+        }
+        fallback_y = 0.51
+    else:
+        known = {}
+        fallback_y = 0.58
+
+    positions = {obj: known[obj] for obj in objects if obj in known}
+    unknown = [obj for obj in objects if obj not in positions]
+    if scene_type == "history_timeline":
+        for index, obj in enumerate(objects):
+            positions[obj] = (0.12 + 0.76 * index / max(1, len(objects) - 1), fallback_y)
+    else:
+        for index, obj in enumerate(unknown):
+            positions[obj] = (0.12 + 0.76 * index / max(1, len(unknown) - 1), fallback_y)
+    return positions
+
+
+def _instruction_state(instructions: dict, scene_time: float) -> dict[str, dict]:
+    states: dict[str, dict] = {}
+    for action in instructions["animations"]:
+        start, duration = float(action.get("start", 0)), float(action["duration"])
+        if not start <= scene_time <= start + duration:
+            continue
+        states[action["object"]] = {
+            "action": action["action"],
+            "progress": min(1.0, max(0.0, (scene_time - start) / duration)),
+        }
+    return states
+
+
+def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
+                            size: tuple[int, int], theme: str, progress: float,
+                            out: Path) -> None:
+    width, height = size
+    scene_type = instructions["scene_type"]
+    objects = instructions["objects"]
+    positions = _instruction_positions(scene_type, objects)
+    scene_time = progress * float(instructions["duration"])
+    active = _instruction_state(instructions, scene_time)
+    reveal_starts = {}
+    for action in instructions["animations"]:
+        if action["action"] == "reveal":
+            obj = action["object"]
+            reveal_starts[obj] = min(reveal_starts.get(obj, float("inf")),
+                                     float(action.get("start", 0)))
+    top, bottom, accent = THEMES.get(theme, THEMES["educational"])
+    image = _gradient(size, top, bottom)
+    draw = ImageDraw.Draw(image)
+    scale = min(width / 1280, height / 720)
+
+    def point(pos: tuple[float, float]) -> tuple[int, int]:
+        return round(pos[0] * width), round(pos[1] * height)
+
+    heading_font = _font(max(18, round(min(width, height) * 0.05)), bold=True)
+    label_font = _font(max(12, round(min(width, height) * 0.019)), bold=True)
+    small_font = _font(max(10, round(min(width, height) * 0.014)))
+    pad = round(min(width, height) * 0.055)
+    draw.text((pad, pad), scene.get("heading", ""), font=heading_font, fill=(250, 253, 255))
+    caption = project_title[:42]
+    draw.text((width - pad - draw.textlength(caption, font=small_font), pad),
+              caption, font=small_font, fill=(210, 225, 237))
+
+    if scene_type == "science_process":
+        caption = "Solar energy drives evaporation; water returns through precipitation."
+        draw.text((pad, round(height * 0.20)), caption, font=small_font, fill=(199, 222, 235))
+        route = [obj for obj in ("ocean", "water", "vapor", "cloud", "rain", "river")
+                 if obj in positions]
+        for left, right in zip(route, route[1:]):
+            _arrow(draw, point(positions[left]), point(positions[right]),
+                   _DIAGRAM_MUTED, max(2, round(3 * scale)))
+    elif scene_type == "electric_circuit":
+        caption = ("An open switch breaks the path; closing it completes the circuit."
+                   if "open_switch" in objects
+                   else "Closed path required for current; directions are explicitly distinguished.")
+        draw.text((pad, round(height * 0.20)), caption, font=small_font, fill=(199, 222, 235))
+        bx, by = point(positions.get("battery", (0.18, 0.52)))
+        lx, ly = point(positions.get("bulb", (0.82, 0.52)))
+        wire_x = round(width * 0.50)
+        wire_top, wire_bottom = round(height * 0.27), round(height * 0.76)
+        wire_color = (116, 190, 207)
+        thickness = max(3, round(4 * scale))
+        battery_radius = round(min(width, height) * 0.043)
+        battery_top, battery_bottom = by - battery_radius, by + battery_radius
+        if "open_switch" in objects:
+            draw.line((bx, battery_top, bx, wire_top, wire_x - 20, wire_top), fill=wire_color, width=thickness)
+            draw.line((wire_x + 20, wire_top, lx, wire_top, lx, ly), fill=wire_color, width=thickness)
+            draw.line((lx, ly, lx, wire_bottom, bx, wire_bottom, bx, battery_bottom),
+                      fill=wire_color, width=thickness)
+            draw.line((wire_x - 18, wire_top, wire_x + 14, wire_top - 19),
+                      fill=(255, 190, 78), width=thickness)
+        else:
+            draw.line((bx, battery_top, bx, wire_top, lx, wire_top, lx, ly),
+                      fill=wire_color, width=thickness, joint="curve")
+            draw.line((lx, ly, lx, wire_bottom, bx, wire_bottom, bx, battery_bottom),
+                      fill=wire_color, width=thickness, joint="curve")
+            current_color = (255, 190, 78)
+            electron_color = (102, 210, 255)
+            if "conventional_current" in objects:
+                _arrow(draw, (round(width * 0.28), wire_top), (round(width * 0.43), wire_top),
+                       current_color, thickness)
+                _arrow(draw, (round(width * 0.72), wire_bottom), (round(width * 0.56), wire_bottom),
+                       current_color, thickness)
+            if "electrons" in objects:
+                _arrow(draw, (round(width * 0.43), wire_top), (round(width * 0.28), wire_top),
+                       electron_color, thickness)
+                _arrow(draw, (round(width * 0.56), wire_bottom), (round(width * 0.72), wire_bottom),
+                       electron_color, thickness)
+    else:
+        left, right = round(width * 0.11), round(width * 0.89)
+        y = round(height * 0.58)
+        draw.line((left, y, right, y), fill=_DIAGRAM_MUTED, width=max(3, round(4 * scale)))
+        for index in range(len(objects) - 1):
+            x1 = round(width * (0.12 + 0.76 * index / max(1, len(objects) - 1)))
+            x2 = round(width * (0.12 + 0.76 * (index + 1) / max(1, len(objects) - 1)))
+            _arrow(draw, (x1 + 8, y), (x2 - 8, y), _DIAGRAM_MUTED, max(2, round(3 * scale)))
+        draw.text((pad, round(height * 0.20)),
+                  "French Revolution • selected events (sequence, not to scale) • 1789–1799",
+                  font=small_font, fill=(199, 222, 235))
+
+    for index, obj in enumerate(objects):
+        if obj in reveal_starts and scene_time < reveal_starts[obj]:
+            continue
+        x, y = positions[obj]
+        state = active.get(obj)
+        action = state["action"] if state else ""
+        amount = state["progress"] if state else 0.0
+        if action in {"move_up", "move_down"}:
+            y += (-1 if action == "move_up" else 1) * 0.055 * math.sin(amount * math.pi)
+        elif action in {"move_left", "move_right", "flow"}:
+            direction = -1 if action == "move_left" else 1
+            x += direction * 0.035 * math.sin(amount * math.pi)
+        x_px, y_px = point((x, y))
+        radius = max(12, round(min(width, height) * (0.043 if scene_type != "history_timeline" else 0.033)))
+        pulse = 1 + 0.14 * math.sin(amount * math.tau) if action == "pulse" else 1
+        radius = (max(4, round(radius * (0.2 + 0.8 * amount))) if action == "reveal"
+                  else round(radius * pulse))
+        color = _DIAGRAM_COLORS[index % len(_DIAGRAM_COLORS)]
+        if action == "highlight":
+            color = (255, 210, 99)
+
+        if scene_type == "electric_circuit" and obj == "battery":
+            draw.rounded_rectangle((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
+                                   radius=max(4, radius // 4), fill=(20, 54, 72),
+                                   outline=color, width=max(3, round(4 * scale)))
+            plus = _font(max(12, round(min(width, height) * 0.035)), bold=True)
+            draw.text((x_px - plus.size / 2, y_px - radius + 2), "+", font=plus,
+                      fill=(255, 190, 78))
+            draw.text((x_px - plus.size / 2, y_px + radius - plus.size - 2), "−", font=plus,
+                      fill=(102, 210, 255))
+        elif scene_type == "electric_circuit" and obj == "bulb":
+            draw.ellipse((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
+                         fill=(41, 58, 67), outline=color, width=max(3, round(4 * scale)))
+            draw.line((x_px - radius // 3, y_px + radius // 3,
+                       x_px + radius // 3, y_px - radius // 3), fill=color, width=max(2, radius // 9))
+        elif scene_type == "history_timeline":
+            draw.ellipse((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
+                         fill=_mix_color(_DIAGRAM_CARD, color, 0.38 if state else 0.12),
+                         outline=color, width=max(3, round(4 * scale)))
+        else:
+            draw.ellipse((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
+                         fill=_mix_color(_DIAGRAM_CARD, color, 0.42 if state else 0.2),
+                         outline=color, width=max(3, round(4 * scale)))
+
+        if state and action in {"flow", "reveal"}:
+            draw.ellipse((x_px - radius - 7, y_px - radius - 7, x_px + radius + 7, y_px + radius + 7),
+                         outline=color, width=max(2, round(3 * scale)))
+        label = _INSTRUCTION_LABELS.get(obj, obj.replace("_", " ").title())
+        text_width = draw.textlength(label, font=label_font)
+        draw.text((x_px - text_width / 2, y_px + radius + round(height * 0.012)),
+                  label, font=label_font, fill=(248, 251, 255))
+        date = _HISTORY_DATES.get(obj)
+        if scene_type == "history_timeline" and date:
+            date_width = draw.textlength(date, font=small_font)
+            draw.text((x_px - date_width / 2, y_px - radius - small_font.size - 6),
+                      date, font=small_font, fill=accent)
+
+    if scene_type == "electric_circuit":
+        draw.text((pad, round(height * 0.90)), "Amber: conventional current (+ to −)",
+                  font=small_font, fill=(255, 190, 78))
+        if "electrons" in objects:
+            electron_text = "Blue: electron drift (− to +)"
+            draw.text((width - pad - draw.textlength(electron_text, font=small_font),
+                       round(height * 0.90)), electron_text, font=small_font, fill=(102, 210, 255))
+    image.save(out)
+
+
+def animated_instruction_scene(scene: dict, project_title: str, size: tuple[int, int],
+                               theme: str, out_dir: Path, fps: int = 8,
+                               loop_seconds: int = 4) -> list[tuple[Path, float]]:
+    """Interpret validated object/action instructions into a short looping 2D animation."""
+    instructions = validate_instructions(scene.get("visual", {}).get("instructions"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    count = max(1, fps * loop_seconds)
+    frame_duration = loop_seconds / count
+    render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))
+    frames = []
+    for index in range(count):
+        path = out_dir / f"instruction_{index:03d}.png"
+        _draw_instruction_frame(scene, instructions, project_title, render_size, theme,
+                                index / count, path)
+        frames.append((path, frame_duration))
+    return frames
 
 
 def _draw_concept_diagram(draw: ImageDraw.ImageDraw, scene: dict, size: tuple[int, int],

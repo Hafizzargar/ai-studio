@@ -51,8 +51,9 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
   <select id="n-lang"><option value="en">English</option><option value="ur-roman">Roman Urdu (Windows voice, approximate)</option><option value="ur">Urdu script (needs Urdu voice)</option></select>
   <label for="n-aspect">Aspect ratio</label>
   <select id="n-aspect"><option>16:9</option><option>9:16</option><option>1:1</option></select>
-  <div class="row"><button class="primary" id="create">Create project</button><button id="water-cycle">Create water-cycle lesson</button></div>
-  <p class="hint">The water-cycle starter includes six narrated scenes with the moving illustration selected. English only.</p>
+  <div class="row"><button class="primary" id="create">Create project</button></div>
+  <div class="row"><button id="water-cycle">Water cycle</button><button id="electric-circuit">Electric circuit</button><button id="french-revolution">French Revolution</button></div>
+  <p class="hint">Starter lessons use structured scene instructions for deterministic 2D animation. English only.</p>
 </aside>
 <main>
   <div id="banner"></div>
@@ -151,7 +152,7 @@ function drawScenes(){const tb=$('#scenes');tb.innerHTML='';
   P.scenes.forEach(sc=>{const h=el('input',{value:sc.heading,ariaLabel:'Heading '+sc.scene_id});h.oninput=()=>{sc.heading=h.value;sched()};
     const n=el('textarea',{value:sc.narration,rows:3,ariaLabel:'Narration '+sc.scene_id});n.oninput=()=>{sc.narration=n.value;sched()};
     const v=el('select',{ariaLabel:'Visual style '+sc.scene_id});
-    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value})));
+    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['instruction_scene','Structured 2D animation'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value})));
     v.onchange=()=>{sc.visual={...(sc.visual||{}),type:v.value};sched()};
     const c=el('select',{ariaLabel:'Camera '+sc.scene_id});['slow_zoom_in','slow_zoom_out','none'].forEach(v=>c.append(el('option',{value:v,textContent:v.replaceAll('_',' '),selected:(sc.camera||{}).move===v})));c.onchange=()=>{sc.camera={move:c.value};sched()};
     const j=jobs[sc.scene_id];const b=el('span',{className:'badge '+(j?j.status:''),textContent:j?j.status:'new',title:j&&j.error||''});
@@ -169,11 +170,14 @@ async function showResult(p){const r=$('#result');r.innerHTML='';
   if(p.status==='done'){r.append(el('video',{controls:true,src:`/api/projects/${P.id}/video?t=${Date.now()}`}),el('div',{className:'row'},el('a',{href:`/api/projects/${P.id}/video`,textContent:'Download MP4'}),el('a',{href:`/api/projects/${P.id}/srt`,textContent:'Download subtitles (SRT)'})))}
   else r.append(el('p',{className:'banner',textContent:p.status==='interrupted'?'The last render was interrupted. Press Render video to continue; finished scenes are kept.':(p.message||'Render failed. See the log below.')}))}
 
-async function createProject(template){const t=$('#n-title').value.trim()||(template?'The Water Cycle':'');if(!t)return alert('Enter a title');
+async function createProject(template){const defaults={water_cycle:'The Water Cycle',electric_circuit:'Electric Circuits',french_revolution:'The French Revolution'};
+  const t=$('#n-title').value.trim()||(template?defaults[template]:'');if(!t)return alert('Enter a title');
   try{const body={title:t,mode:$('#n-mode').value,language:$('#n-lang').value,aspect:$('#n-aspect').value};
   if(template)body.template=template;const p=await J('/api/projects',body);$('#n-title').value='';await open(p.id)}catch(e){err(e)}}
 $('#create').onclick=()=>createProject(null);
 $('#water-cycle').onclick=()=>createProject('water_cycle');
+$('#electric-circuit').onclick=()=>createProject('electric_circuit');
+$('#french-revolution').onclick=()=>createProject('french_revolution');
 $('#segment').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/segment`,{script:$('#script').value});jobs={};drawScenes();list()}catch(e){err(e)}};
 $('#pdf').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
   try{const a=await (await api(`/api/projects/${P.id}/pdf`,{method:'POST',body:fd})).json();

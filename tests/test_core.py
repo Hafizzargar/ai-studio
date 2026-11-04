@@ -6,6 +6,8 @@ from PIL import Image, ImageChops
 import pytest
 
 from aistudio import config, project, scenes, subtitles, tts, jobs, visuals
+from aistudio.animation import InstructionError, validate_instructions
+from aistudio.lessons import build_lesson
 
 
 @pytest.fixture(autouse=True)
@@ -95,9 +97,71 @@ def test_water_cycle_animation_has_motion_and_focuses_scene_phase(tmp_path):
     )
     assert len(frames) == 8
     assert all(path.exists() and duration == pytest.approx(0.25) for path, duration in frames)
-    with Image.open(frames[0][0]) as first, Image.open(frames[1][0]) as later:
+    with Image.open(frames[0][0]) as first:
         assert first.size == (480, 270)
-        assert ImageChops.difference(first.convert("RGB"), later.convert("RGB")).getbbox() is not None
+        initial = first.convert("RGB")
+    moved = False
+    for path, _ in frames[1:]:
+        with Image.open(path) as later:
+            moved = moved or ImageChops.difference(
+                initial, later.convert("RGB")
+            ).getbbox() is not None
+    assert moved
+
+
+def test_instruction_schema_rejects_invalid_actions_and_timing():
+    instructions = {
+        "schema_version": 1,
+        "scene_type": "science_process",
+        "duration": 12,
+        "objects": ["water", "vapor"],
+        "animations": [{"object": "vapor", "action": "move_up", "start": 2, "duration": 5}],
+        "narration": "Water evaporates.",
+    }
+    assert validate_instructions(instructions) is instructions
+
+    invalid = {**instructions, "animations": [
+        {"object": "missing", "action": "move_up", "start": 2, "duration": 5},
+    ]}
+    with pytest.raises(InstructionError, match="unknown object"):
+        validate_instructions(invalid)
+
+    invalid = {**instructions, "animations": [
+        {"object": "vapor", "action": "move_up", "start": 9, "duration": 5},
+    ]}
+    with pytest.raises(InstructionError, match="fit inside"):
+        validate_instructions(invalid)
+
+
+def test_structured_lessons_render_moving_frames_for_three_subjects(tmp_path):
+    examples = {
+        "water_cycle": ("science_process", "water_cycle"),
+        "electric_circuit": ("electric_circuit", "instruction_scene"),
+        "french_revolution": ("history_timeline", "instruction_scene"),
+    }
+    for template, (scene_type, visual_type) in examples.items():
+        lesson_scenes, script = build_lesson(template)
+        assert lesson_scenes and script.startswith("# ")
+        scene = lesson_scenes[0]
+        instructions = validate_instructions(scene["visual"]["instructions"])
+        assert scene["visual"]["type"] == visual_type
+        assert instructions["scene_type"] == scene_type
+        frames = visuals.animated_instruction_scene(
+            scene, template.replace("_", " ").title(), (320, 180), "educational", tmp_path / template,
+            fps=4, loop_seconds=2,
+        )
+        assert len(frames) == 8
+        assert all(path.exists() and duration == pytest.approx(0.25) for path, duration in frames)
+        with Image.open(frames[0][0]) as first:
+            assert first.size == (480, 270)
+            initial = first.convert("RGB")
+        moved = False
+        for path, _ in frames[1:]:
+            with Image.open(path) as later:
+                moved = moved or ImageChops.difference(
+                    initial, later.convert("RGB")
+                ).getbbox() is not None
+        assert moved
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")

@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, jobs, pdfio, project, tts
+from . import config, jobs, lessons, pdfio, project, tts
 from .scenes import script_to_scenes
 
 app = FastAPI(title="AI Studio", version="0.1.0")
@@ -76,17 +76,19 @@ def projects():
 def create_project(body: NewProject):
     if body.language not in {"en", "ur", "ur-roman"}:
         raise HTTPException(400, "language must be 'en', 'ur', or 'ur-roman'")
-    if body.template not in (None, "water_cycle"):
-        raise HTTPException(400, "template must be 'water_cycle'")
-    if body.template == "water_cycle" and body.language != "en":
-        raise HTTPException(400, "The water-cycle lesson template is currently available in English only")
+    templates = {"water_cycle", "electric_circuit", "french_revolution"}
+    if body.template is not None and body.template not in templates:
+        raise HTTPException(400, f"template must be one of {', '.join(sorted(templates))}")
+    if body.template and body.language != "en":
+        raise HTTPException(400, "Animation lesson templates are currently available in English only")
 
+    template_scenes = None
     template_script = None
-    if body.template == "water_cycle":
+    if body.template:
         try:
-            template_script = (config.ROOT / "samples" / "sample_script.txt").read_text(encoding="utf-8")
+            template_scenes, template_script = lessons.build_lesson(body.template)
         except OSError as e:
-            raise HTTPException(500, f"Could not load the water-cycle lesson template: {e}")
+            raise HTTPException(500, f"Could not load the animation lesson template: {e}")
 
     try:
         p = project.create(body.title, body.mode, language=body.language, voice=body.voice,
@@ -94,10 +96,8 @@ def create_project(body: NewProject):
                            aspect=body.aspect, fps=body.fps)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if template_script is not None:
-        p["scenes"] = script_to_scenes(template_script, body.language)
-        for scene in p["scenes"]:
-            scene["visual"] = {"type": "water_cycle"}
+    if template_scenes is not None and template_script is not None:
+        p["scenes"] = template_scenes
         (project.project_dir(p["id"]) / "source" / "script.txt").write_text(
             template_script, encoding="utf-8")
         project.save(p["id"], p)

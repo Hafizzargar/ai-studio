@@ -11,6 +11,7 @@ import traceback
 from pathlib import Path
 
 from . import config, jobs, project, subtitles, tts, visuals
+from .animation import InstructionError
 from .scenes import scene_hash, split_sentences
 
 log = logging.getLogger("aistudio.render")
@@ -103,9 +104,18 @@ def render_scene(proj: dict, scene: dict, idx: int, total: int) -> tuple[Path, f
             raise RenderError(f"{scene['scene_id']}: PDF not found: {pdf}")
         visuals.pdf_page_card(scene, pdf, size, st["theme"], sdir / "bg.png")
         video_input = ["-framerate", str(fps), "-loop", "1", "-i", "bg.png"]
-    elif vis.get("type") == "water_cycle":
+    elif vis.get("type") == "water_cycle" and "instructions" not in vis:
         frames = visuals.animated_water_cycle(scene, proj["title"], size, st["theme"], sdir)
         animation = sdir / "water_cycle.mp4"
+        _encode_diagram_frames(frames, animation, fps, sum(duration for _, duration in frames), sdir)
+        video_input = ["-stream_loop", "-1", "-i", animation.name]
+    elif vis.get("type") in {"instruction_scene", "water_cycle"}:
+        try:
+            frames = visuals.animated_instruction_scene(scene, proj["title"], size, st["theme"], sdir)
+        except InstructionError as e:
+            raise RenderError(f"{scene['scene_id']}: invalid animation instructions: {e}") from e
+        animation_name = "water_cycle.mp4" if vis.get("type") == "water_cycle" else "instruction.mp4"
+        animation = sdir / animation_name
         _encode_diagram_frames(frames, animation, fps, sum(duration for _, duration in frames), sdir)
         video_input = ["-stream_loop", "-1", "-i", animation.name]
     else:

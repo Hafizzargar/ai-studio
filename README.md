@@ -8,7 +8,7 @@ Script or PDF in, narrated MP4 with burned-in subtitles and an SRT file out.
 - Projects: create, autosave, reopen, crash recovery (atomic save plus 5 rolling backups).
 - Script editor in a local web UI. `# Heading` lines start a scene; long paragraphs are split automatically.
 - PDF upload: headings, definitions, years, scanned-page detection, extractive script draft with page references.
-- Scenes can use a fixed-position concept map or a moving water-cycle illustration. The water-cycle template moves vapour, cloud droplets, rain and collection water, while waves move and the sun pulses; it is motion graphics, not a general-purpose animation engine or morphing cloud simulation. It emphasizes the process named by the scene heading. PDF scenes can show the original PDF page with narrated sentences highlighted (the PDF is rendered as an image, never changed).
+- Scenes can use a fixed-position concept map, a legacy moving water-cycle illustration, or the structured 2D animation engine for water-cycle, electric-circuit and French-Revolution starter lessons. It renders deterministic motion graphics from validated objects and actions, not AI-generated footage or a full physics simulation. PDF scenes can show the original PDF page with narrated sentences highlighted (the PDF is rendered as an image, never changed).
 - Offline voice: Piper (best), Windows built-in voices (SAPI, zero install, selectable with a voice preview), espeak-ng, or a silent test mode. English and Roman Urdu are selectable; Roman Urdu is read as typed by a Windows voice and may be pronounced approximately.
 - Exact sentence-level subtitles (SRT export and styled ASS burn-in).
 - Scene-by-scene rendering with checkpoints. Re-rendering only redoes scenes you changed. A failed scene never loses the others. Closing the app mid-render and rendering again resumes.
@@ -44,16 +44,15 @@ python -m pytest                                      # run the tests
 
 Projects live in `projects\<id>\`: `project.json`, `source\` (script, original PDF), `scenes\<id>\` (audio, clip, cues), `renders\final.mp4`, `renders\final.srt`, `logs\render.log`.
 Set `AISTUDIO_PROJECTS` to store projects somewhere else (for example another drive).
-In the scene list, choose **Moving water cycle** in the Visual column to use the animated illustration. It is a hand-drawn 2D motion-graphics template, not AI-generated footage; choose Concept map for the existing diagram style.
-For a complete starter lesson, choose **Create water-cycle lesson** when creating a project. It loads the six-scene English sample and selects the moving illustration for every scene; narration, visuals, and subtitles can then be edited before rendering.
+Choose **Water cycle**, **Electric circuit**, or **French Revolution** when creating a project to load a complete English starter lesson. Their scenes include editable narration and structured visual instructions. The water-cycle template keeps the `water_cycle` visual identifier for compatibility; the circuit and history lessons use `instruction_scene`.
 
 ## Project file (project.json)
 
-Each scene: `scene_id, heading, narration, language, visual {type: title_card | water_cycle | pdf_page, pdf, page}, camera {move: slow_zoom_in | slow_zoom_out | none}, subtitle {enabled}, source_refs, dramatized, status`. The renderer hashes everything that affects the picture or sound, so unchanged scenes are never re-rendered. The UI is only an editor for this file.
+Each scene: `scene_id, heading, narration, language, visual {type: title_card | water_cycle | instruction_scene | pdf_page, instructions, pdf, page}, camera {move: slow_zoom_in | slow_zoom_out | none}, subtitle {enabled}, source_refs, dramatized, status`. Structured `visual.instructions` use schema version 1: a scene type (`science_process`, `electric_circuit`, or `history_timeline`), duration, object IDs, narration, and timed object actions (`flow`, `highlight`, `move_up`, `move_down`, `move_left`, `move_right`, `pulse`, or `reveal`). The renderer rejects unknown fields, malformed IDs, undeclared action objects, unsupported actions, and out-of-bounds timing. Gemini is not connected; starter lessons currently supply hand-authored instructions. The renderer hashes everything that affects the rendered clip, so unchanged scenes are never re-rendered.
 
 ## Limits you should know about
 
-- Tested here: Windows, Python 3.11, FFmpeg 8.1, and Windows SAPI; the six-scene water-cycle lesson passed its decode and audio/video drift checks. Automated tests: 23 passed. Piper and a 16 GB CPU-only PC have not been tested.
+- Starter lessons are English-only and hand-authored; review narration and visual claims for your curriculum before publishing. The circuit drawing distinguishes conventional current from electron drift. The French Revolution timeline is a concise overview, not a complete historical account.
 - Urdu-script narration needs a compatible Urdu voice. Without one the app refuses to narrate Urdu (to avoid wrong pronunciation). Roman Urdu uses a Windows voice and may be mispronounced. Urdu subtitles use libass and need an Arabic-script font. Title cards use Pillow; Urdu shaping there needs Pillow built with raqm, otherwise use English headings.
 - Scanned PDFs are detected but OCR is not included yet.
 - Highlights are per scene (all narrated sentences matched on the page), not timed per sentence yet. Matching is exact-text search, so heavily re-worded scripts will not highlight.

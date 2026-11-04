@@ -94,6 +94,51 @@ def test_water_cycle_lesson_template_creates_animated_scenes():
     assert unsupported_language.status_code == 400
 
 
+def test_structured_lesson_templates_are_available_through_api():
+    from aistudio.server import app
+
+    client = TestClient(app)
+    expected_types = {
+        "water_cycle": ("science_process", "water_cycle"),
+        "electric_circuit": ("electric_circuit", "instruction_scene"),
+        "french_revolution": ("history_timeline", "instruction_scene"),
+    }
+    for template, (scene_type, visual_type) in expected_types.items():
+        response = client.post("/api/projects", json={
+            "title": template.replace("_", " ").title(),
+            "template": template,
+            "tts_backend": "silent",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scenes"]
+        assert all(scene["visual"]["type"] == visual_type for scene in data["scenes"])
+        assert all(scene["visual"]["instructions"]["scene_type"] == scene_type
+                   for scene in data["scenes"])
+        assert (project.project_dir(data["id"]) / "source" / "script.txt").exists()
+
+    unsupported_language = client.post("/api/projects", json={
+        "title": "Roman Urdu Circuit", "template": "electric_circuit", "language": "ur-roman",
+    })
+    assert unsupported_language.status_code == 400
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_instruction_scene_rendering_for_each_subject():
+    from aistudio import lessons, render
+
+    for template in ("water_cycle", "electric_circuit", "french_revolution"):
+        data = project.create(template.replace("_", " ").title(), tts_backend="silent", fps=24)
+        lesson_scenes, _ = lessons.build_lesson(template)
+        data["scenes"] = lesson_scenes[:1]
+        project.save(data["id"], data)
+        clip, duration = render.render_scene(data, data["scenes"][0], 1, 1)
+
+        assert clip.exists() and duration > 0
+        expected_animation = "water_cycle.mp4" if template == "water_cycle" else "instruction.mp4"
+        assert (project.project_dir(data["id"]) / "scenes" / "s001" / expected_animation).exists()
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_complete_water_cycle_lesson_renders_animation_to_video():
     from aistudio import render
