@@ -219,8 +219,12 @@ def assemble(proj: dict, clips: list[Path], durations: list[float]) -> dict:
     listing = rdir / "clips.txt"
     listing.write_text("".join(f"file '{c.resolve().as_posix()}'\n" for c in clips), encoding="utf-8")
     joined = rdir / "joined.tmp.mp4"
+    fps = int(st["fps"])
     _run([ffmpeg(), "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-          "-i", str(listing), "-c", "copy", str(joined)])
+          "-i", str(listing), "-fps_mode", "cfr", "-r", str(fps), "-c:v", "libx264",
+          "-preset", "veryfast", "-crf", "21", "-bf", "0", "-pix_fmt", "yuv420p",
+          "-video_track_timescale", str(fps * 1000), "-c:a", "aac", "-b:a", "160k",
+          "-ar", "44100", "-ac", "2", str(joined)])
 
     final = rdir / "final.mp4"
     music = st.get("music", {}).get("path")

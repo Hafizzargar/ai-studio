@@ -16,10 +16,11 @@ Render runs as a separate process: python -m engine.cli render <id>
 ```
 
 Flow: script/PDF -> scenes (project.json) -> per scene: TTS per sentence -> narration.wav + cues -> generated concept diagram, animated water-cycle frames, or PDF page background PNG
--> FFmpeg (looping animation, zoompan, burned ASS + AAC) -> clip.mp4 -> concat (stream copy) -> optional music mix -> final.mp4 + final.srt -> validation.
+-> FFmpeg (looping animation, zoompan, burned ASS + AAC) -> clip.mp4 -> timestamp-normalized concat encode -> optional music mix -> final.mp4 + final.srt -> validation.
 
 Design rules: renderer is independent of the UI; one scene = one job; clip written to a temp name then renamed;
-all clips share codec/size/fps/sample rate so concat can copy streams; no B-frames so timestamps stay clean at joins.
+scene clips use matching codecs and formats, then final assembly re-encodes at the project frame rate to normalize
+timestamps across scene boundaries; no B-frames keep per-scene timestamps straightforward.
 
 Planned extension points: `visual.type` (add `svg_scene`, `chart`, `map`), a frame-pipe renderer using resvg for animated scenes,
 `characters` list on each scene (already in the schema).

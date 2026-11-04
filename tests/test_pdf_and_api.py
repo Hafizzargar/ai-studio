@@ -56,6 +56,20 @@ def test_roman_urdu_language_and_windows_voice_list(monkeypatch):
     assert client.get("/api/health").json()["sapi_voices"] == ["Microsoft Zira Desktop"]
 
 
+def test_health_reports_windows_voice_discovery_failure(monkeypatch):
+    from aistudio.server import app
+
+    def fail_voice_discovery():
+        raise tts.TTSError("PowerShell voice discovery failed")
+
+    monkeypatch.setattr(tts, "sapi_voices", fail_voice_discovery)
+    response = TestClient(app).get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["sapi_voices"] == []
+    assert response.json()["sapi_voices_error"] == "PowerShell voice discovery failed"
+
+
 def test_water_cycle_lesson_template_creates_animated_scenes():
     from aistudio.server import app
 
@@ -81,7 +95,7 @@ def test_water_cycle_lesson_template_creates_animated_scenes():
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
-def test_water_cycle_lesson_renders_animation_to_video():
+def test_complete_water_cycle_lesson_renders_animation_to_video():
     from aistudio import render
     from aistudio.server import app
 
@@ -89,14 +103,15 @@ def test_water_cycle_lesson_renders_animation_to_video():
     data = client.post("/api/projects", json={
         "title": "Water Cycle Render", "template": "water_cycle", "tts_backend": "silent",
     }).json()
-    data["scenes"] = data["scenes"][:1]
-    data["scenes"][0]["narration"] = "Water moves around Earth."
     project.save(data["id"], data)
 
     result = render.render_project(data["id"])
 
     assert result["ok"] and result["valid"]
-    assert (project.project_dir(data["id"]) / "scenes" / "s001" / "water_cycle.mp4").exists()
+    assert len(data["scenes"]) == 6
+    assert all((project.project_dir(data["id"]) / "scenes" / scene["scene_id"]
+                / "water_cycle.mp4").exists() for scene in data["scenes"])
+    assert (project.project_dir(data["id"]) / "renders" / "final.mp4").exists()
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")

@@ -59,7 +59,11 @@ def index():
 @app.get("/api/health")
 def health():
     report = config.tool_report()
-    report["sapi_voices"] = tts.sapi_voices()
+    try:
+        report["sapi_voices"] = tts.sapi_voices()
+    except (OSError, tts.TTSError) as e:
+        report["sapi_voices"] = []
+        report["sapi_voices_error"] = str(e)
     return report
 
 

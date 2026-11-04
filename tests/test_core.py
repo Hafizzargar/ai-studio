@@ -100,6 +100,38 @@ def test_water_cycle_animation_has_motion_and_focuses_scene_phase(tmp_path):
         assert ImageChops.difference(first.convert("RGB"), later.convert("RGB")).getbbox() is not None
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+def test_concat_reencodes_continuous_timestamps_for_long_lessons():
+    from aistudio import render
+
+    data = project.create("Concat timing", tts_backend="silent", fps=24)
+    scene_clips = []
+    durations = []
+    for index in range(20):
+        scene_id = f"s{index + 1:03d}"
+        scene_dir = render.scene_dir(data["id"], scene_id)
+        scene_dir.mkdir(parents=True)
+        clip = scene_dir / "clip.mp4"
+        requested_duration = 0.8 + (index % 4) * 0.1
+        render._run([
+            render.ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"color=c=blue:s=160x90:r=24:d={requested_duration}",
+            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+            "-t", str(requested_duration), "-c:v", "libx264", "-preset", "ultrafast",
+            "-crf", "30", "-bf", "0", "-pix_fmt", "yuv420p", "-r", "24",
+            "-video_track_timescale", "24000", "-c:a", "aac", "-b:a", "64k",
+            "-ar", "44100", "-ac", "2", "-shortest", str(clip),
+        ])
+        (scene_dir / "cues.json").write_text("[]", encoding="utf-8")
+        scene_clips.append(clip)
+        durations.append(render.probe_duration(clip))
+
+    for count in (2, 6, 10, 20):
+        result = render.assemble(data, scene_clips[:count], durations[:count])
+        assert result["valid"], f"{count}-scene lesson failed validation: {result}"
+        assert result["drift_sec"] < 0.5
+
+
 def test_hash_changes_only_when_relevant():
     p = project.default_settings()
     s = scenes.new_scene(1, "A", "Hello there.")

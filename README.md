@@ -8,7 +8,7 @@ Script or PDF in, narrated MP4 with burned-in subtitles and an SRT file out.
 - Projects: create, autosave, reopen, crash recovery (atomic save plus 5 rolling backups).
 - Script editor in a local web UI. `# Heading` lines start a scene; long paragraphs are split automatically.
 - PDF upload: headings, definitions, years, scanned-page detection, extractive script draft with page references.
-- Scenes can use a fixed-position concept map or a moving water-cycle illustration. The water-cycle option animates rising vapour, cloud droplets, falling rain, flowing collection water and waves, and emphasizes the process named by the scene heading. PDF scenes can show the original PDF page with narrated sentences highlighted (the PDF is rendered as an image, never changed).
+- Scenes can use a fixed-position concept map or a moving water-cycle illustration. The water-cycle template moves vapour, cloud droplets, rain and collection water, while waves move and the sun pulses; it is motion graphics, not a general-purpose animation engine or morphing cloud simulation. It emphasizes the process named by the scene heading. PDF scenes can show the original PDF page with narrated sentences highlighted (the PDF is rendered as an image, never changed).
 - Offline voice: Piper (best), Windows built-in voices (SAPI, zero install, selectable with a voice preview), espeak-ng, or a silent test mode. English and Roman Urdu are selectable; Roman Urdu is read as typed by a Windows voice and may be pronounced approximately.
 - Exact sentence-level subtitles (SRT export and styled ASS burn-in).
 - Scene-by-scene rendering with checkpoints. Re-rendering only redoes scenes you changed. A failed scene never loses the others. Closing the app mid-render and rendering again resumes.
@@ -53,7 +53,7 @@ Each scene: `scene_id, heading, narration, language, visual {type: title_card | 
 
 ## Limits you should know about
 
-- Tested here: Windows, Python 3.11, FFmpeg 8.1, and Windows SAPI; the six-scene sample passed its decode and audio/video drift checks. Automated tests: 20 passed, with one known failure in the two-scene concat timestamp check. Piper and a 16 GB CPU-only PC have not been tested.
+- Tested here: Windows, Python 3.11, FFmpeg 8.1, and Windows SAPI; the six-scene water-cycle lesson passed its decode and audio/video drift checks. Automated tests: 23 passed. Piper and a 16 GB CPU-only PC have not been tested.
 - Urdu-script narration needs a compatible Urdu voice. Without one the app refuses to narrate Urdu (to avoid wrong pronunciation). Roman Urdu uses a Windows voice and may be mispronounced. Urdu subtitles use libass and need an Arabic-script font. Title cards use Pillow; Urdu shaping there needs Pillow built with raqm, otherwise use English headings.
 - Scanned PDFs are detected but OCR is not included yet.
 - Highlights are per scene (all narrated sentences matched on the page), not timed per sentence yet. Matching is exact-text search, so heavily re-worded scripts will not highlight.

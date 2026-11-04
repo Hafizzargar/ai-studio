@@ -105,19 +105,33 @@ const err=e=>alert(e.message||e);
 
 async function health(){const h=await (await api('/api/health')).json();const b=$('#banner');b.innerHTML='';
   voiceOptions={sapi:h.sapi_voices||[],piper:h.piper_voices||[]};
+  if(h.sapi_voices_error)b.append(el('div',{className:'banner',textContent:`Windows voice discovery failed: ${h.sapi_voices_error}`}));
   const real=['piper','sapi','espeak'].some(k=>h.tts_backends[k]);
   if(!h.ffmpeg)b.append(el('div',{className:'banner',textContent:'ffmpeg was not found. Put ffmpeg.exe in the vendor folder, then restart.'}));
   if(!real)b.append(el('div',{className:'banner',textContent:'No speech engine found. Videos will be silent. Install Piper and a voice (see README) or use Windows SAPI.'}));
-  if(P)fillVoices(P.settings.voice)}
+  constrainBackends();if(P)fillVoices(P.settings.voice)}
+function voiceKind(value){return !value?'':value.startsWith('sapi:')?'sapi':'piper'}
+function voiceFits(value,backend,lang){
+  if(!value)return true;
+  const kind=voiceKind(value);
+  if(lang==='ur-roman')return kind==='sapi';
+  if(backend==='sapi'||backend==='piper')return kind===backend;
+  return backend==='auto'&&(kind==='sapi'||kind==='piper');
+}
+function constrainBackends(){
+  const lang=$('#s-lang').value,backend=$('#s-backend');
+  Array.from(backend.options).forEach(o=>{o.disabled=lang==='ur-roman'&&o.value!=='sapi'});
+  if(lang==='ur-roman'&&backend.value!=='sapi')backend.value='sapi';
+}
 function fillVoices(selected=''){const select=$('#s-voice');if(!select)return;select.innerHTML='';
   select.append(el('option',{value:'',textContent:'System default voice'}));
   const lang=$('#s-lang').value,backend=$('#s-backend').value;
-  const groups=lang==='ur-roman'?['sapi']:backend==='sapi'?['sapi']:backend==='piper'?['piper']:['sapi','piper'];
+  const groups=lang==='ur-roman'?['sapi']:backend==='sapi'?['sapi']:backend==='piper'?['piper']:backend==='auto'?['sapi','piper']:[];
   groups.forEach(kind=>voiceOptions[kind].forEach(name=>{const value=kind==='sapi'?'sapi:'+name:name;
     select.append(el('option',{value,textContent:kind==='sapi'?name:`Piper: ${name}`}))}));
-  if(selected&&!Array.from(select.options).some(o=>o.value===selected))
+  if(selected&&voiceFits(selected,backend,lang)&&!Array.from(select.options).some(o=>o.value===selected))
     select.append(el('option',{value:selected,textContent:`Saved voice: ${selected}`}));
-  select.value=selected;
+  select.value=voiceFits(selected,backend,lang)?selected:'';
   if(lang==='ur-roman')$('#voice-note').textContent='Roman Urdu is read as typed by the selected Windows voice. Pronunciation may be approximate; use the Hear button to preview each scene.';
   else if(lang==='ur')$('#voice-note').textContent='Urdu script needs a compatible Urdu voice. The app will report an error if the selected voice cannot speak Urdu.';
   else $('#voice-note').textContent='Choose an installed voice, then preview it or use Hear on a scene.'}
@@ -125,7 +139,7 @@ async function list(){const ps=await (await api('/api/projects')).json();const b
   ps.forEach(p=>{const b=el('button',{className:'proj'+(P&&P.id===p.id?' active':'')},p.title,el('small',{textContent:`${p.mode}, ${p.scenes} scenes`}));b.onclick=()=>open(p.id);box.append(b)});
   if(!ps.length)box.append(el('p',{className:'hint',textContent:'No projects yet.'}))}
 async function open(id){P=await (await api('/api/projects/'+id)).json();$('#empty').hidden=true;$('#work').hidden=false;$('#ptitle').textContent=P.title;
-  const s=P.settings;$('#s-lang').value=s.language||'en';$('#s-backend').value=s.tts_backend;$('#s-speed').value=s.speed;$('#s-res').value=s.resolution;$('#s-fps').value=String(s.fps);fillVoices(s.voice);
+  const s=P.settings;$('#s-lang').value=s.language||'en';$('#s-backend').value=s.tts_backend;constrainBackends();$('#s-speed').value=s.speed;$('#s-res').value=s.resolution;$('#s-fps').value=String(s.fps);fillVoices(s.voice);
   try{$('#script').value=await (await api(`/api/projects/${id}/source-script`)).text()}catch{$('#script').value=P.scenes.map(x=>`# ${x.heading}\n${x.narration}`).join('\n\n')}
   $('#result').innerHTML='';drawScenes();list();poll(true)}
 function sched(){clearTimeout(saveT);saveT=setTimeout(save,800)}
@@ -166,9 +180,9 @@ $('#pdf').onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new
   $('#pdfinfo').textContent=`${a.title}: ${a.page_count} pages, ${a.headings.length} headings, ${a.definitions.length} definitions found.`+(a.warnings.length?' '+a.warnings.join(' '):'')}catch(e){err(e)}};
 $('#draft').onclick=async()=>{try{P=await J(`/api/projects/${P.id}/pdf/draft`,{});jobs={};drawScenes();list()}catch(e){err(e)}};
 $('#render').onclick=()=>render(false);$('#force').onclick=()=>render(true);
-$('#s-backend').addEventListener('change',()=>{fillVoices($('#s-voice').value);sched()});
-$('#s-lang').addEventListener('change',()=>{if($('#s-lang').value==='ur-roman'){if(!$('#s-voice').value.startsWith('sapi:'))$('#s-voice').value='';$('#s-backend').value='sapi'}fillVoices($('#s-voice').value);sched()});
-$('#s-voice').addEventListener('change',()=>{if($('#s-voice').value.startsWith('sapi:'))$('#s-backend').value='sapi';else if($('#s-voice').value&&!$('#s-voice').value.startsWith('sapi:'))$('#s-backend').value='piper';sched()});
+$('#s-backend').addEventListener('change',()=>{constrainBackends();if(!voiceFits($('#s-voice').value,$('#s-backend').value,$('#s-lang').value))$('#s-voice').value='';fillVoices($('#s-voice').value);sched()});
+$('#s-lang').addEventListener('change',()=>{constrainBackends();if(!voiceFits($('#s-voice').value,$('#s-backend').value,$('#s-lang').value))$('#s-voice').value='';fillVoices($('#s-voice').value);sched()});
+$('#s-voice').addEventListener('change',()=>{const kind=voiceKind($('#s-voice').value);if(kind)$('#s-backend').value=kind;constrainBackends();fillVoices($('#s-voice').value);sched()});
 ['s-speed','s-res','s-fps'].forEach(i=>$('#'+i).addEventListener('change',sched));
 $('#voice-demo').onclick=async()=>{if(!P)return;try{await save();const text=$('#s-lang').value==='ur-roman'?'Assalam-o-alaikum! Yeh Roman Urdu awaaz ka demo hai. Main aap ke matn ko English voice ke saath parh raha hoon.':$('#s-lang').value==='ur'?'یہ آواز کا ایک مختصر نمونہ ہے۔':'Hello! This is a sample of the selected voice.';
   const r=await api(`/api/projects/${P.id}/preview-audio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});const audio=new Audio(URL.createObjectURL(await r.blob()));audio.play()}catch(e){err(e)}};
