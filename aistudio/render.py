@@ -11,7 +11,12 @@ import traceback
 from pathlib import Path
 
 from . import config, jobs, project, subtitles, tts, visuals
-from .animation import InstructionError
+from .animation import (
+    InstructionError,
+    instruction_status,
+    validate_instructions,
+    validate_sentence_mappings,
+)
 from .scenes import scene_hash, split_sentences
 
 log = logging.getLogger("aistudio.render")
@@ -91,13 +96,27 @@ def render_scene(proj: dict, scene: dict, idx: int, total: int) -> tuple[Path, f
     sentences = split_sentences(scene["narration"])
     if not sentences:
         raise RenderError(f"{scene['scene_id']}: narration is empty")
+    vis = scene.get("visual", {})
+    if vis.get("type") in {"instruction_scene", "water_cycle"} and "instructions" in vis:
+        origin, state = instruction_status(scene)
+        if state != "current":
+            raise RenderError(
+                f"{scene['scene_id']}: {origin} animation instructions are {state}; "
+                "review and save them against the current narration before rendering"
+            )
+        try:
+            instructions = validate_instructions(vis["instructions"])
+            validate_sentence_mappings(instructions, len(sentences))
+        except InstructionError as e:
+            raise RenderError(
+                f"{scene['scene_id']}: animation instructions need sentence mappings: {e}"
+            ) from e
     cues, dur, used = tts.build_scene_audio(sentences, lang, st, project.project_dir(pid) / "cache" / "tts",
                                             sdir / "narration.wav")
     if used == {"silent"}:
         log.warning("%s: SILENT audio (no TTS engine)", scene["scene_id"])
     (sdir / "cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
 
-    vis = scene.get("visual", {})
     if vis.get("type") == "pdf_page":
         pdf = project.project_dir(pid) / vis.get("pdf", "source/book.pdf")
         if not pdf.exists():
@@ -112,7 +131,7 @@ def render_scene(proj: dict, scene: dict, idx: int, total: int) -> tuple[Path, f
     elif vis.get("type") in {"instruction_scene", "water_cycle"}:
         try:
             frames = visuals.animated_instruction_scene(
-                scene, proj["title"], size, st["theme"], sdir, scene_duration=dur
+                scene, proj["title"], size, st["theme"], sdir, scene_duration=dur, cues=cues
             )
         except InstructionError as e:
             raise RenderError(f"{scene['scene_id']}: invalid animation instructions: {e}") from e

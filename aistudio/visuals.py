@@ -11,7 +11,7 @@ import pymupdf
 from PIL import Image, ImageDraw, ImageFont, features
 
 from . import config
-from .animation import validate_instructions
+from .animation import InstructionError, bind_sentence_cues, validate_instructions
 from .pdfio import find_highlights
 from .scenes import split_sentences
 
@@ -456,13 +456,22 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
 def animated_instruction_scene(scene: dict, project_title: str, size: tuple[int, int],
                                theme: str, out_dir: Path, fps: int = 8,
                                loop_seconds: int = 4,
-                               scene_duration: float | None = None) -> list[tuple[Path, float]]:
-    """Render the instruction timeline across the narration duration."""
+                               scene_duration: float | None = None,
+                               cues: list[dict] | None = None) -> list[tuple[Path, float]]:
+    """Render sentence-linked actions at their actual narration cue times."""
     instructions = validate_instructions(scene.get("visual", {}).get("instructions"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    render_duration = loop_seconds if scene_duration is None else scene_duration
+    has_sentence_actions = any("sentence_index" in action for action in instructions["animations"])
+    if cues is not None:
+        instructions = bind_sentence_cues(instructions, cues)
+    elif has_sentence_actions:
+        raise InstructionError("Sentence-linked animation requires narration cues")
+    render_duration = (scene_duration if scene_duration is not None else
+                       max((float(cue["end"]) for cue in cues), default=loop_seconds)
+                       if cues is not None else loop_seconds)
     if not math.isfinite(render_duration) or render_duration <= 0:
         raise ValueError("Scene duration must be a positive finite number")
+    instructions = {**instructions, "duration": render_duration}
     count = max(1, math.ceil(fps * render_duration))
     frame_duration = render_duration / count
     render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))

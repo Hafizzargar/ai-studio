@@ -1,6 +1,7 @@
 """Validation for the structured instructions consumed by the 2D renderer."""
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 
@@ -56,22 +57,40 @@ def validate_instructions(instructions: dict) -> dict:
     if not isinstance(animations, list) or len(animations) > MAX_ANIMATIONS:
         raise InstructionError(f"Animation animations must contain at most {MAX_ANIMATIONS} actions")
     for index, animation in enumerate(animations):
-        if not isinstance(animation, dict) or set(animation) - {"object", "action", "start", "duration"}:
+        if not isinstance(animation, dict) or set(animation) - {
+            "object", "action", "start", "duration", "sentence_index"
+        }:
             raise InstructionError(f"Animation action {index + 1} has unsupported fields")
-        if not {"object", "action", "duration"} <= set(animation):
-            raise InstructionError(f"Animation action {index + 1} needs object, action, and duration")
+        if not {"object", "action"} <= set(animation):
+            raise InstructionError(f"Animation action {index + 1} needs object and action")
+        if "sentence_index" not in animation and "duration" not in animation:
+            raise InstructionError(
+                f"Animation action {index + 1} needs a sentence_index or duration"
+            )
+        if "start" in animation and "duration" not in animation:
+            raise InstructionError(
+                f"Animation action {index + 1} needs both start and duration"
+            )
         if not isinstance(animation["object"], str) or animation["object"] not in objects:
             raise InstructionError(f"Animation action {index + 1} refers to an unknown object")
         if not isinstance(animation["action"], str) or animation["action"] not in ACTIONS:
             raise InstructionError(f"Animation action {index + 1} has an unsupported action")
-        start = animation.get("start", 0)
-        action_duration = animation["duration"]
-        if any(isinstance(value, bool) or not isinstance(value, (int, float))
-               for value in (start, action_duration)):
-            raise InstructionError(f"Animation action {index + 1} timing must use finite numbers")
-        if (start < 0 or action_duration <= 0 or start + action_duration > duration
-                or not math.isfinite(start) or not math.isfinite(action_duration)):
-            raise InstructionError(f"Animation action {index + 1} must fit inside the scene duration")
+        if "sentence_index" in animation:
+            sentence_index = animation["sentence_index"]
+            if (isinstance(sentence_index, bool) or not isinstance(sentence_index, int)
+                    or sentence_index < 0):
+                raise InstructionError(
+                    f"Animation action {index + 1} sentence_index must be a non-negative integer"
+                )
+        if "duration" in animation:
+            start = animation.get("start", 0)
+            action_duration = animation["duration"]
+            if any(isinstance(value, bool) or not isinstance(value, (int, float))
+                   for value in (start, action_duration)):
+                raise InstructionError(f"Animation action {index + 1} timing must use finite numbers")
+            if (start < 0 or action_duration <= 0 or start + action_duration > duration
+                    or not math.isfinite(start) or not math.isfinite(action_duration)):
+                raise InstructionError(f"Animation action {index + 1} must fit inside the scene duration")
 
     narration = instructions["narration"]
     if (not isinstance(narration, str) or not narration.strip()
@@ -80,3 +99,55 @@ def validate_instructions(instructions: dict) -> dict:
             f"Animation narration must contain 1 to {MAX_NARRATION_LENGTH} characters"
         )
     return instructions
+
+
+def narration_fingerprint(narration: str) -> str:
+    return hashlib.sha256(narration.encode("utf-8")).hexdigest()
+
+
+def instruction_status(scene: dict) -> tuple[str, str]:
+    """Return instruction origin and whether its reviewed narration is current."""
+    visual = scene.get("visual", {})
+    instructions = visual.get("instructions")
+    metadata = visual.get("instruction_meta")
+    if not isinstance(instructions, dict):
+        return "none", "missing"
+    if not isinstance(metadata, dict) or metadata.get("origin") not in {"generated", "manual"}:
+        return "untracked", "review"
+    current = (
+        instructions.get("narration") == scene.get("narration")
+        and metadata.get("narration_hash") == narration_fingerprint(scene.get("narration", ""))
+    )
+    return metadata["origin"], "current" if current else "stale"
+
+
+def validate_sentence_mappings(instructions: dict, sentence_count: int) -> None:
+    """Require every visual action to point to a sentence in the current narration."""
+    for index, action in enumerate(instructions["animations"]):
+        sentence_index = action.get("sentence_index")
+        if sentence_index is None:
+            raise InstructionError(
+                f"Animation action {index + 1} is not linked to a narration sentence"
+            )
+        if sentence_index >= sentence_count:
+            raise InstructionError(
+                f"Animation action {index + 1} sentence_index is outside the narration"
+            )
+
+
+def bind_sentence_cues(instructions: dict, cues: list[dict]) -> dict:
+    """Resolve sentence-linked actions to the actual TTS cue boundaries."""
+    validate_sentence_mappings(instructions, len(cues))
+    actions = []
+    for action in instructions["animations"]:
+        cue = cues[action["sentence_index"]]
+        start, end = cue.get("start"), cue.get("end")
+        if (isinstance(start, bool) or not isinstance(start, (int, float))
+                or isinstance(end, bool) or not isinstance(end, (int, float))
+                or not math.isfinite(start) or not math.isfinite(end)
+                or start < 0 or end <= start):
+            raise InstructionError(f"Narration cue {action['sentence_index']} has invalid timing")
+        actions.append({**action, "start": start, "duration": end - start})
+    return {**instructions, "duration": max(
+        float(instructions["duration"]), max((float(cue["end"]) for cue in cues), default=0.0)
+    ), "animations": actions}

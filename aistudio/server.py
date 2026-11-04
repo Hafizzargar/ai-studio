@@ -12,7 +12,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import config, jobs, lessons, pdfio, project, tts
-from .scenes import script_to_scenes
+from .animation import (
+    InstructionError,
+    narration_fingerprint,
+    validate_instructions,
+    validate_sentence_mappings,
+)
+from .scenes import script_to_scenes, split_sentences
 
 app = FastAPI(title="AI Studio", version="0.1.0")
 UI = config.ROOT / "ui" / "index.html"
@@ -49,6 +55,10 @@ class RenderIn(BaseModel):
 
 class PreviewIn(BaseModel):
     text: str
+
+
+class InstructionReviewIn(BaseModel):
+    instructions: dict
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -116,6 +126,33 @@ def put_project(pid: str, body: dict):
         raise HTTPException(400, "Body must be a full project with matching id and a scenes list")
     project.save(pid, project.migrate(body))
     return {"saved": True}
+
+
+@app.post("/api/projects/{pid}/scenes/{scene_id}/instructions/review")
+def review_instructions(pid: str, scene_id: str, body: InstructionReviewIn):
+    p = _load(pid)
+    scene = next((item for item in p["scenes"] if item.get("scene_id") == scene_id), None)
+    if scene is None:
+        raise HTTPException(404, f"Scene {scene_id} not found")
+    visual = scene.get("visual", {})
+    if visual.get("type") not in {"instruction_scene", "water_cycle"}:
+        raise HTTPException(400, "This scene has no structured animation instructions")
+    try:
+        instructions = validate_instructions({
+            **body.instructions,
+            "narration": scene.get("narration", ""),
+        })
+        validate_sentence_mappings(instructions, len(split_sentences(scene.get("narration", ""))))
+    except InstructionError as e:
+        raise HTTPException(400, f"Animation instructions need review: {e}") from e
+
+    visual["instructions"] = instructions
+    visual["instruction_meta"] = {
+        "origin": "manual",
+        "narration_hash": narration_fingerprint(scene["narration"]),
+    }
+    project.save(pid, p)
+    return {"saved": True, "scene": scene}
 
 
 @app.post("/api/projects/{pid}/segment")

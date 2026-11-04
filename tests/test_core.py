@@ -6,7 +6,12 @@ from PIL import Image, ImageChops
 import pytest
 
 from aistudio import config, project, scenes, subtitles, tts, jobs, visuals
-from aistudio.animation import InstructionError, validate_instructions
+from aistudio.animation import (
+    InstructionError,
+    bind_sentence_cues,
+    instruction_status,
+    validate_instructions,
+)
 from aistudio.lessons import build_lesson
 
 
@@ -146,9 +151,14 @@ def test_structured_lessons_render_moving_frames_for_three_subjects(tmp_path):
         instructions = validate_instructions(scene["visual"]["instructions"])
         assert scene["visual"]["type"] == visual_type
         assert instructions["scene_type"] == scene_type
+        sentences = scenes.split_sentences(scene["narration"])
+        cues = [
+            {"start": index * 0.4 + 0.1, "end": index * 0.4 + 0.35, "text": sentence}
+            for index, sentence in enumerate(sentences)
+        ]
         frames = visuals.animated_instruction_scene(
             scene, template.replace("_", " ").title(), (320, 180), "educational", tmp_path / template,
-            fps=4, loop_seconds=2,
+            fps=4, loop_seconds=2, scene_duration=2, cues=cues,
         )
         assert len(frames) == 8
         assert all(path.exists() and duration == pytest.approx(0.25) for path, duration in frames)
@@ -169,6 +179,10 @@ def test_instruction_animation_spans_narration_duration(tmp_path):
     frames = visuals.animated_instruction_scene(
         scene, "Electric Circuit", (320, 180), "educational", tmp_path,
         fps=4, scene_duration=6,
+        cues=[
+            {"start": 0.15, "end": 1.75, "text": "first sentence"},
+            {"start": 2.1, "end": 5.6, "text": "second sentence"},
+        ],
     )
 
     assert len(frames) == 24
@@ -202,6 +216,13 @@ def test_starter_diagrams_preserve_teaching_relationships(tmp_path, monkeypatch)
 
     circuit_scenes, _ = build_lesson("electric_circuit")
     circuit = circuit_scenes[2]
+    circuit_timeline = bind_sentence_cues(
+        circuit["visual"]["instructions"],
+        [
+            {"start": 0.1, "end": 4.2, "text": "Electrons move opposite."},
+            {"start": 4.5, "end": 7.8, "text": "The descriptions differ."},
+        ],
+    )
     original_arrow = visuals._arrow
     arrows = []
 
@@ -211,7 +232,7 @@ def test_starter_diagrams_preserve_teaching_relationships(tmp_path, monkeypatch)
 
     monkeypatch.setattr(visuals, "_arrow", record_arrow)
     visuals._draw_instruction_frame(
-        circuit, circuit["visual"]["instructions"], "Electric Circuit",
+        circuit, circuit_timeline, "Electric Circuit",
         (480, 270), "educational", 0.5, tmp_path / "circuit.png",
     )
     assert ((134, 73), (206, 73), (255, 190, 78)) in arrows
@@ -247,6 +268,84 @@ def test_starter_diagrams_preserve_teaching_relationships(tmp_path, monkeypatch)
     assert [timeline_positions[obj][0] for obj in timeline["objects"]] == sorted(
         timeline_positions[obj][0] for obj in timeline["objects"]
     )
+
+
+def test_instruction_actions_follow_actual_sentence_cue_times():
+    scene = build_lesson("electric_circuit")[0][0]
+    cues = [
+        {"start": 0.15, "end": 1.1, "text": "A circuit needs a source and load."},
+        {"start": 1.45, "end": 4.8, "text": "When the path is closed, current flows."},
+    ]
+
+    timeline = bind_sentence_cues(scene["visual"]["instructions"], cues)
+    active = visuals._instruction_state(timeline, 2.0)
+
+    assert timeline["animations"][0]["start"] == cues[1]["start"]
+    assert timeline["animations"][0]["duration"] == pytest.approx(3.35)
+    assert set(active) == {"conventional_current", "bulb"}
+    assert all(state["start"] == cues[1]["start"]
+               for actions in active.values() for state in actions.values())
+
+
+def test_sentence_linked_animation_rejects_missing_tts_cues(tmp_path):
+    scene = build_lesson("electric_circuit")[0][0]
+
+    with pytest.raises(InstructionError, match="requires narration cues"):
+        visuals.animated_instruction_scene(
+            scene, "Electric Circuit", (320, 180), "educational", tmp_path
+        )
+
+
+def test_starter_lessons_encode_expected_facts_and_relationships():
+    water, _ = build_lesson("water_cycle")
+    evaporation = scenes.split_sentences(water[1]["narration"])
+    condensation = scenes.split_sentences(water[2]["narration"])
+    precipitation = scenes.split_sentences(water[3]["narration"])
+    collection = scenes.split_sentences(water[4]["narration"])
+    assert "liquid water turns into water vapour" in evaporation[1]
+    assert "vapour rises" in condensation[0]
+    assert "Cool vapour changes back into tiny droplets" in condensation[1]
+    assert "grow heavy" in precipitation[0] and "fall to the ground" in precipitation[0]
+    assert "groundwater" in collection[1] and "returns to the ocean" in collection[2]
+    assert all("sentence_index" in action
+               for scene in water for action in scene["visual"]["instructions"]["animations"])
+    water_actions = water[1]["visual"]["instructions"]["animations"]
+    assert {action["object"]: action["sentence_index"] for action in water_actions} == {
+        "sun": 0, "vapor": 1,
+    }
+
+    circuit, _ = build_lesson("electric_circuit")
+    complete = scenes.split_sentences(circuit[0]["narration"])
+    conventional = scenes.split_sentences(circuit[1]["narration"])
+    electrons = scenes.split_sentences(circuit[2]["narration"])
+    switch = scenes.split_sentences(circuit[3]["narration"])
+    assert "path is closed" in complete[1] and "bulb lights" in complete[1]
+    assert "positive terminal" in conventional[0] and "negative terminal" in conventional[0]
+    assert "opposite direction" in electrons[0]
+    assert "open switch breaks" in switch[0] and "steady current does not flow" in switch[0]
+    assert circuit[0]["visual"]["instructions"]["animations"][0]["sentence_index"] == 1
+    assert circuit[3]["visual"]["instructions"]["animations"][1]["sentence_index"] == 1
+
+    history, _ = build_lesson("french_revolution")
+    chronology = [visuals._HISTORY_DATES[obj] for obj in history[1]["visual"]["instructions"]["objects"]]
+    assert chronology == ["5 May 1789", "17 Jun 1789", "14 Jul 1789"]
+    assert "formed a National Assembly" in history[1]["narration"]
+    assert "took the Bastille" in history[1]["narration"]
+    republic_sentences = scenes.split_sentences(history[2]["narration"])
+    assert "1792" in republic_sentences[0]
+    assert "executed in 1793" in republic_sentences[1]
+    assert "1793 and 1794" in republic_sentences[2]
+
+
+def test_narration_edits_preserve_instructions_but_mark_them_stale():
+    scene = build_lesson("electric_circuit")[0][0]
+    original_instructions = json.loads(json.dumps(scene["visual"]["instructions"]))
+    assert instruction_status(scene) == ("generated", "current")
+
+    scene["narration"] = "The lesson text has changed."
+
+    assert scene["visual"]["instructions"] == original_instructions
+    assert instruction_status(scene) == ("generated", "stale")
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")

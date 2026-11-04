@@ -13,7 +13,7 @@ FONTS_DIR = ROOT / "assets" / "fonts"
 IS_WINDOWS = os.name == "nt"
 
 # Bump when rendering output changes, so cached scene clips are invalidated.
-RENDER_VERSION = 5
+RENDER_VERSION = 6
 SCHEMA_VERSION = 1
 
 _RES = {"720p": 720, "1080p": 1080}

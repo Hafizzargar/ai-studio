@@ -1,3 +1,4 @@
+import copy
 import shutil
 
 import pymupdf
@@ -121,6 +122,48 @@ def test_structured_lesson_templates_are_available_through_api():
         "title": "Roman Urdu Circuit", "template": "electric_circuit", "language": "ur-roman",
     })
     assert unsupported_language.status_code == 400
+
+
+def test_changed_narration_blocks_render_until_manual_instruction_review():
+    from aistudio import render
+    from aistudio.animation import instruction_status
+    from aistudio.server import app
+
+    client = TestClient(app)
+    data = client.post("/api/projects", json={
+        "title": "Narration review", "template": "electric_circuit", "tts_backend": "silent",
+    }).json()
+    scene = data["scenes"][0]
+    original = copy.deepcopy(scene["visual"]["instructions"])
+    scene["narration"] = "The circuit remains open. Current does not flow."
+    put = client.put(f"/api/projects/{data['id']}", json=data)
+
+    assert put.status_code == 200
+    loaded = project.load(data["id"])
+    edited_scene = loaded["scenes"][0]
+    assert edited_scene["visual"]["instructions"] == original
+    assert instruction_status(edited_scene) == ("generated", "stale")
+    with pytest.raises(render.RenderError, match="review and save"):
+        render.render_scene(loaded, edited_scene, 1, len(loaded["scenes"]))
+
+    unmapped = copy.deepcopy(original)
+    unmapped["animations"][0].pop("sentence_index")
+    unmapped["animations"][0].update({"start": 0, "duration": 5})
+    rejected = client.post(
+        f"/api/projects/{data['id']}/scenes/{scene['scene_id']}/instructions/review",
+        json={"instructions": unmapped},
+    )
+    assert rejected.status_code == 400
+
+    reviewed = client.post(
+        f"/api/projects/{data['id']}/scenes/{scene['scene_id']}/instructions/review",
+        json={"instructions": original},
+    )
+    assert reviewed.status_code == 200
+    reviewed_scene = reviewed.json()["scene"]
+    assert instruction_status(reviewed_scene) == ("manual", "current")
+    assert reviewed_scene["visual"]["instructions"]["animations"] == original["animations"]
+    assert reviewed_scene["visual"]["instructions"]["narration"] == edited_scene["narration"]
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
