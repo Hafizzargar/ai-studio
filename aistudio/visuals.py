@@ -272,14 +272,19 @@ def _instruction_positions(scene_type: str, objects: list[str]) -> dict[str, tup
     return positions
 
 
-def _instruction_state(instructions: dict, scene_time: float) -> dict[str, dict]:
-    states: dict[str, dict] = {}
+def _instruction_state(instructions: dict, scene_time: float) -> dict[str, dict[str, dict]]:
+    states: dict[str, dict[str, dict]] = {}
     for action in instructions["animations"]:
         start, duration = float(action.get("start", 0)), float(action["duration"])
         if not start <= scene_time <= start + duration:
             continue
-        states[action["object"]] = {
-            "action": action["action"],
+        object_states = states.setdefault(action["object"], {})
+        name = action["action"]
+        current = object_states.get(name)
+        if current is not None and current["start"] > start:
+            continue
+        object_states[name] = {
+            "start": start,
             "progress": min(1.0, max(0.0, (scene_time - start) / duration)),
         }
     return states
@@ -378,9 +383,15 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
         if obj in reveal_starts and scene_time < reveal_starts[obj]:
             continue
         x, y = positions[obj]
-        state = active.get(obj)
-        action = state["action"] if state else ""
-        amount = state["progress"] if state else 0.0
+        states = active.get(obj, {})
+        motion = max(
+            ((name, state) for name, state in states.items()
+             if name in {"flow", "move_down", "move_left", "move_right", "move_up"}),
+            key=lambda item: item[1]["start"],
+            default=None,
+        )
+        action, motion_state = motion if motion else ("", {})
+        amount = motion_state.get("progress", 0.0)
         if action in {"move_up", "move_down"}:
             y += (-1 if action == "move_up" else 1) * 0.055 * math.sin(amount * math.pi)
         elif action in {"move_left", "move_right", "flow"}:
@@ -388,11 +399,12 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
             x += direction * 0.035 * math.sin(amount * math.pi)
         x_px, y_px = point((x, y))
         radius = max(12, round(min(width, height) * (0.043 if scene_type != "history_timeline" else 0.033)))
-        pulse = 1 + 0.14 * math.sin(amount * math.tau) if action == "pulse" else 1
-        radius = (max(4, round(radius * (0.2 + 0.8 * amount))) if action == "reveal"
+        pulse = 1 + 0.14 * math.sin(states["pulse"]["progress"] * math.tau) if "pulse" in states else 1
+        reveal = states.get("reveal")
+        radius = (max(4, round(radius * (0.2 + 0.8 * reveal["progress"]))) if reveal
                   else round(radius * pulse))
         color = _DIAGRAM_COLORS[index % len(_DIAGRAM_COLORS)]
-        if action == "highlight":
+        if "highlight" in states:
             color = (255, 210, 99)
 
         if scene_type == "electric_circuit" and obj == "battery":
@@ -411,14 +423,14 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
                        x_px + radius // 3, y_px - radius // 3), fill=color, width=max(2, radius // 9))
         elif scene_type == "history_timeline":
             draw.ellipse((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
-                         fill=_mix_color(_DIAGRAM_CARD, color, 0.38 if state else 0.12),
+                         fill=_mix_color(_DIAGRAM_CARD, color, 0.38 if states else 0.12),
                          outline=color, width=max(3, round(4 * scale)))
         else:
             draw.ellipse((x_px - radius, y_px - radius, x_px + radius, y_px + radius),
-                         fill=_mix_color(_DIAGRAM_CARD, color, 0.42 if state else 0.2),
+                         fill=_mix_color(_DIAGRAM_CARD, color, 0.42 if states else 0.2),
                          outline=color, width=max(3, round(4 * scale)))
 
-        if state and action in {"flow", "reveal"}:
+        if "flow" in states or reveal:
             draw.ellipse((x_px - radius - 7, y_px - radius - 7, x_px + radius + 7, y_px + radius + 7),
                          outline=color, width=max(2, round(3 * scale)))
         label = _INSTRUCTION_LABELS.get(obj, obj.replace("_", " ").title())
@@ -443,12 +455,16 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
 
 def animated_instruction_scene(scene: dict, project_title: str, size: tuple[int, int],
                                theme: str, out_dir: Path, fps: int = 8,
-                               loop_seconds: int = 4) -> list[tuple[Path, float]]:
-    """Interpret validated object/action instructions into a short looping 2D animation."""
+                               loop_seconds: int = 4,
+                               scene_duration: float | None = None) -> list[tuple[Path, float]]:
+    """Render the instruction timeline across the narration duration."""
     instructions = validate_instructions(scene.get("visual", {}).get("instructions"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    count = max(1, fps * loop_seconds)
-    frame_duration = loop_seconds / count
+    render_duration = loop_seconds if scene_duration is None else scene_duration
+    if not math.isfinite(render_duration) or render_duration <= 0:
+        raise ValueError("Scene duration must be a positive finite number")
+    count = max(1, math.ceil(fps * render_duration))
+    frame_duration = render_duration / count
     render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))
     frames = []
     for index in range(count):

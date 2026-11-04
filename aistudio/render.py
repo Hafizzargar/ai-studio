@@ -111,13 +111,15 @@ def render_scene(proj: dict, scene: dict, idx: int, total: int) -> tuple[Path, f
         video_input = ["-stream_loop", "-1", "-i", animation.name]
     elif vis.get("type") in {"instruction_scene", "water_cycle"}:
         try:
-            frames = visuals.animated_instruction_scene(scene, proj["title"], size, st["theme"], sdir)
+            frames = visuals.animated_instruction_scene(
+                scene, proj["title"], size, st["theme"], sdir, scene_duration=dur
+            )
         except InstructionError as e:
             raise RenderError(f"{scene['scene_id']}: invalid animation instructions: {e}") from e
         animation_name = "water_cycle.mp4" if vis.get("type") == "water_cycle" else "instruction.mp4"
         animation = sdir / animation_name
-        _encode_diagram_frames(frames, animation, fps, sum(duration for _, duration in frames), sdir)
-        video_input = ["-stream_loop", "-1", "-i", animation.name]
+        _encode_diagram_frames(frames, animation, fps, dur, sdir)
+        video_input = ["-i", animation.name]
     else:
         frames = visuals.animated_title_card(scene, idx, total, proj["title"], size, st["theme"], cues, sdir)
         diagram_video = sdir / "diagram.mp4"

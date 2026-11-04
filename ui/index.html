@@ -152,7 +152,7 @@ function drawScenes(){const tb=$('#scenes');tb.innerHTML='';
   P.scenes.forEach(sc=>{const h=el('input',{value:sc.heading,ariaLabel:'Heading '+sc.scene_id});h.oninput=()=>{sc.heading=h.value;sched()};
     const n=el('textarea',{value:sc.narration,rows:3,ariaLabel:'Narration '+sc.scene_id});n.oninput=()=>{sc.narration=n.value;sched()};
     const v=el('select',{ariaLabel:'Visual style '+sc.scene_id});
-    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['instruction_scene','Structured 2D animation'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value})));
+    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['instruction_scene','Structured 2D animation'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value,disabled:value==='instruction_scene'&&!((sc.visual||{}).instructions)})));
     v.onchange=()=>{sc.visual={...(sc.visual||{}),type:v.value};sched()};
     const c=el('select',{ariaLabel:'Camera '+sc.scene_id});['slow_zoom_in','slow_zoom_out','none'].forEach(v=>c.append(el('option',{value:v,textContent:v.replaceAll('_',' '),selected:(sc.camera||{}).move===v})));c.onchange=()=>{sc.camera={move:c.value};sched()};
     const j=jobs[sc.scene_id];const b=el('span',{className:'badge '+(j?j.status:''),textContent:j?j.status:'new',title:j&&j.error||''});

@@ -164,6 +164,91 @@ def test_structured_lessons_render_moving_frames_for_three_subjects(tmp_path):
         assert moved
 
 
+def test_instruction_animation_spans_narration_duration(tmp_path):
+    scene = build_lesson("electric_circuit")[0][0]
+    frames = visuals.animated_instruction_scene(
+        scene, "Electric Circuit", (320, 180), "educational", tmp_path,
+        fps=4, scene_duration=6,
+    )
+
+    assert len(frames) == 24
+    assert sum(duration for _, duration in frames) == pytest.approx(6)
+
+
+def test_overlapping_instruction_actions_are_preserved():
+    instructions = {
+        "animations": [
+            {"object": "current", "action": "flow", "start": 0, "duration": 12},
+            {"object": "current", "action": "highlight", "start": 2, "duration": 8},
+        ],
+    }
+
+    state = visuals._instruction_state(instructions, 4)
+
+    assert set(state["current"]) == {"flow", "highlight"}
+    assert state["current"]["flow"]["progress"] == pytest.approx(1 / 3)
+    assert state["current"]["highlight"]["progress"] == pytest.approx(0.25)
+
+
+def test_starter_diagrams_preserve_teaching_relationships(tmp_path, monkeypatch):
+    water_scenes, _ = build_lesson("water_cycle")
+    water_positions = visuals._instruction_positions(
+        "science_process", water_scenes[0]["visual"]["instructions"]["objects"]
+    )
+    assert water_positions["ocean"][1] > water_positions["vapor"][1]
+    assert water_positions["vapor"][1] > water_positions["cloud"][1]
+    assert water_positions["cloud"][1] < water_positions["rain"][1]
+    assert water_positions["rain"][1] < water_positions["river"][1]
+
+    circuit_scenes, _ = build_lesson("electric_circuit")
+    circuit = circuit_scenes[2]
+    original_arrow = visuals._arrow
+    arrows = []
+
+    def record_arrow(draw, start, end, color, width):
+        arrows.append((start, end, color))
+        original_arrow(draw, start, end, color, width)
+
+    monkeypatch.setattr(visuals, "_arrow", record_arrow)
+    visuals._draw_instruction_frame(
+        circuit, circuit["visual"]["instructions"], "Electric Circuit",
+        (480, 270), "educational", 0.5, tmp_path / "circuit.png",
+    )
+    assert ((134, 73), (206, 73), (255, 190, 78)) in arrows
+    assert ((206, 73), (134, 73), (102, 210, 255)) in arrows
+
+    open_switch = {
+        "heading": "Open switch",
+        "visual": {"instructions": {
+            "scene_type": "electric_circuit",
+            "duration": 1,
+            "objects": ["battery", "open_switch", "bulb", "wire"],
+            "animations": [],
+        }},
+    }
+    switch_path = tmp_path / "open_switch.png"
+    visuals._draw_instruction_frame(
+        open_switch, open_switch["visual"]["instructions"], "Circuit",
+        (480, 270), "educational", 0, switch_path,
+    )
+    with Image.open(switch_path) as image:
+        pixels = image.convert("RGB")
+        assert pixels.getpixel((220, 73)) == (116, 190, 207)
+        assert pixels.getpixel((260, 73)) == (116, 190, 207)
+        assert pixels.getpixel((240, 73)) != (116, 190, 207)
+
+    history_scenes, _ = build_lesson("french_revolution")
+    timeline = history_scenes[1]["visual"]["instructions"]
+    timeline_positions = visuals._instruction_positions("history_timeline", timeline["objects"])
+    assert timeline["objects"] == ["estates_general", "national_assembly", "bastille"]
+    assert [visuals._HISTORY_DATES[obj] for obj in timeline["objects"]] == [
+        "5 May 1789", "17 Jun 1789", "14 Jul 1789",
+    ]
+    assert [timeline_positions[obj][0] for obj in timeline["objects"]] == sorted(
+        timeline_positions[obj][0] for obj in timeline["objects"]
+    )
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 def test_concat_reencodes_continuous_timestamps_for_long_lessons():
     from aistudio import render
