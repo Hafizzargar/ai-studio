@@ -1,0 +1,15 @@
+1
+00:00:00,150 --> 00:00:04,569
+Hello, I'm Pip, your friendly guide to big ideas.
+
+2
+00:00:04,869 --> 00:00:10,592
+Let's follow water as it rises, gathers into clouds, and returns as rain.
+
+3
+00:00:10,892 --> 00:00:13,736
+Where do you think the rain goes next?
+
+4
+00:00:14,036 --> 00:00:18,160
+Great thinking, water returns to rivers and oceans.

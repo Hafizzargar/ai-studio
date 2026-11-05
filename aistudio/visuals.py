@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 import math
+import random
 import re
 import textwrap
 from pathlib import Path
@@ -453,6 +454,201 @@ def _draw_instruction_frame(scene: dict, instructions: dict, project_title: str,
     image.save(out)
 
 
+def _realistic_event(scene: dict) -> str | None:
+    """Choose a concrete scene illustration when narration describes a visible event."""
+    text = f"{scene.get('heading', '')} {scene.get('narration', '')}".casefold()
+    if (re.search(r"\b(?:buildings?|towers?|houses?|skyscrapers?|structures?)\b", text)
+            and re.search(
+                r"\b(?:collaps(?:e|es|ed|ing)|toppl(?:e|es|ed|ing)|fell\s+down|fall(?:s|ing)?\s+down)\b",
+                text,
+            )):
+        return "building_collapse"
+    if re.search(r"\b(?:rain|raining|rainfall|raindrops?|precipitation)\b", text):
+        return "rain"
+    return None
+
+
+def _event_progress(event: str, cues: list[dict] | None,
+                    scene_time: float, duration: float) -> float:
+    if event == "building_collapse":
+        for cue in cues or []:
+            if re.search(
+                r"\b(?:collaps(?:e|es|ed|ing)|toppl(?:e|es|ed|ing)|fell\s+down|fall(?:s|ing)?\s+down)\b",
+                cue.get("text", ""),
+                re.I,
+            ):
+                start, end = float(cue["start"]), float(cue["end"])
+                return min(1.0, max(0.0, (scene_time - start) / max(0.1, end - start)))
+        return min(1.0, max(0.0, scene_time / max(0.1, duration * 0.8)))
+    return min(1.0, max(0.0, scene_time / max(0.1, duration)))
+
+
+def _draw_rain_scene(scene: dict, size: tuple[int, int], elapsed: float,
+                     out: Path) -> None:
+    width, height = size
+    image = _gradient(size, (54, 75, 91), (123, 151, 164))
+    draw = ImageDraw.Draw(image)
+    ground_y = round(height * 0.82)
+    draw.ellipse((round(width * 0.02), round(height * 0.62),
+                  round(width * 0.39), round(height * 0.9)), fill=(84, 111, 121))
+    draw.ellipse((round(width * 0.61), round(height * 0.63),
+                  round(width * 1.02), round(height * 0.9)), fill=(76, 104, 115))
+    draw.rectangle((0, ground_y, width, height), fill=(54, 75, 77))
+    draw.line((0, ground_y, width, ground_y), fill=(133, 158, 158),
+              width=max(2, round(height * 0.006)))
+
+    cloud_color = (100, 118, 128)
+    cloud_highlight = (143, 158, 164)
+    for box in (
+        (0.19, 0.20, 0.81, 0.39),
+        (0.27, 0.13, 0.50, 0.35),
+        (0.42, 0.10, 0.68, 0.36),
+        (0.56, 0.19, 0.75, 0.37),
+    ):
+        draw.ellipse(tuple(round(value * width) if index % 2 == 0
+                           else round(value * height)
+                           for index, value in enumerate(box)),
+                     fill=cloud_color)
+    draw.ellipse((round(width * 0.28), round(height * 0.14),
+                  round(width * 0.49), round(height * 0.30)), fill=cloud_highlight)
+    draw.ellipse((round(width * 0.44), round(height * 0.11),
+                  round(width * 0.65), round(height * 0.29)), fill=cloud_highlight)
+    draw.rectangle((round(width * 0.25), round(height * 0.25),
+                    round(width * 0.72), round(height * 0.34)), fill=cloud_color)
+
+    rng = random.Random(51)
+    rain_top, rain_bottom = round(height * 0.32), round(height * 0.80)
+    span = rain_bottom - rain_top
+    for index in range(72):
+        x = round(width * (0.22 + rng.random() * 0.56))
+        phase = (rng.random() + elapsed * (1.15 + rng.random() * 0.45)) % 1
+        y = rain_top + round(phase * span)
+        length = max(6, round(height * (0.025 + rng.random() * 0.025)))
+        thickness = max(1, round(width * 0.0015))
+        color = (173, 207, 220) if index % 3 else (205, 224, 231)
+        draw.line((x, y, x - max(1, round(length * 0.18)), y + length),
+                  fill=color, width=thickness)
+        if phase > 0.95:
+            splash_y = ground_y - 2
+            splash_width = max(3, round(width * 0.009))
+            draw.arc((x - splash_width, splash_y - 4, x + splash_width, splash_y + 5),
+                     180, 350, fill=(173, 207, 220), width=thickness)
+
+    title = scene.get("heading", "Rain")
+    title_font = _font(max(18, round(min(width, height) * 0.05)), bold=True)
+    pad = round(min(width, height) * 0.055)
+    draw.rounded_rectangle((pad - 8, pad - 5,
+                            pad + round(draw.textlength(title, font=title_font)) + 12,
+                            pad + title_font.size + 10),
+                           radius=8, fill=(24, 39, 49))
+    draw.text((pad, pad), title, font=title_font, fill=(248, 252, 255))
+    image.save(out)
+
+
+def _draw_building_collapse(scene: dict, size: tuple[int, int], progress: float,
+                            out: Path) -> None:
+    width, height = size
+    image = _gradient(size, (75, 112, 142), (208, 190, 158))
+    draw = ImageDraw.Draw(image)
+    ground_y = round(height * 0.82)
+    draw.rectangle((0, ground_y, width, height), fill=(104, 94, 78))
+    draw.line((0, ground_y, width, ground_y), fill=(57, 57, 52),
+              width=max(3, round(height * 0.01)))
+
+    collapse = min(1.0, max(0.0, (progress - 0.12) / 0.72))
+    collapse = collapse * collapse * (3 - 2 * collapse)
+    left, right = round(width * 0.35), round(width * 0.65)
+    building_height = round(height * 0.54)
+    floor_height = building_height / 5
+    facade = (166, 157, 139)
+    edge = (76, 73, 67)
+    for floor in range(5):
+        compression = 1 - 0.78 * collapse
+        floor_top = round(ground_y - (floor + 1) * floor_height * compression)
+        floor_bottom = round(ground_y - floor * floor_height * compression)
+        shift = round(width * 0.10 * collapse * floor / 4)
+        floor_left, floor_right = left + shift, right + shift
+        if floor_bottom - floor_top < 5:
+            continue
+        draw.rectangle((floor_left, floor_top, floor_right, floor_bottom),
+                       fill=facade, outline=edge, width=max(2, round(width * 0.004)))
+        draw.line((floor_left, floor_top, floor_right, floor_top),
+                  fill=(211, 200, 178), width=max(2, round(height * 0.006)))
+        window_height = max(3, round((floor_bottom - floor_top) * 0.42))
+        window_top = floor_top + max(2, round((floor_bottom - floor_top) * 0.22))
+        for column in range(3):
+            window_left = floor_left + round((floor_right - floor_left) * (0.12 + column * 0.30))
+            window_width = max(3, round((floor_right - floor_left) * 0.18))
+            draw.rectangle((window_left, window_top, window_left + window_width,
+                            min(floor_bottom - 2, window_top + window_height)),
+                           fill=(56, 82, 94), outline=(222, 211, 188),
+                           width=max(1, round(width * 0.002)))
+
+    if collapse > 0.35:
+        rubble_height = round(height * (0.035 + 0.13 * collapse))
+        mound = [
+            (round(width * 0.26), ground_y),
+            (round(width * 0.31), ground_y - round(rubble_height * 0.42)),
+            (round(width * 0.40), ground_y - rubble_height),
+            (round(width * 0.48), ground_y - round(rubble_height * 0.60)),
+            (round(width * 0.58), ground_y - round(rubble_height * 0.88)),
+            (round(width * 0.70), ground_y - round(rubble_height * 0.25)),
+            (round(width * 0.75), ground_y),
+        ]
+        draw.polygon(mound, fill=(135, 125, 108), outline=(71, 68, 61))
+        rng = random.Random(23)
+        debris_colors = ((104, 99, 88), (181, 166, 142), (122, 116, 101))
+        for index in range(18):
+            x = round(width * (0.30 + rng.random() * 0.40))
+            y = ground_y - round(rubble_height * rng.random() * 0.85)
+            radius = max(3, round(min(width, height) * (0.012 + rng.random() * 0.018)))
+            draw.polygon(((x - radius, y + radius // 2), (x, y - radius),
+                          (x + radius, y + radius // 2)),
+                         fill=debris_colors[index % len(debris_colors)],
+                         outline=(75, 70, 60))
+
+    if 0.18 < collapse < 1:
+        dust_alpha = round(130 * math.sin(collapse * math.pi))
+        dust = (205, 184, 150)
+        for index in range(7):
+            offset = round(width * (0.045 + index * 0.018))
+            radius = round(height * (0.025 + 0.01 * (index % 3)))
+            x = round(width * 0.5) + (offset if index % 2 else -offset)
+            y = ground_y - round(height * (0.08 + 0.03 * (index % 3)))
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius),
+                         fill=tuple(round(channel * (1 - dust_alpha / 255) +
+                                          190 * dust_alpha / 255) for channel in dust))
+
+    title = scene.get("heading", "Building collapse")
+    title_font = _font(max(18, round(min(width, height) * 0.05)), bold=True)
+    pad = round(min(width, height) * 0.055)
+    draw.rounded_rectangle((pad - 8, pad - 5,
+                            pad + round(draw.textlength(title, font=title_font)) + 12,
+                            pad + title_font.size + 10),
+                           radius=8, fill=(24, 39, 49))
+    draw.text((pad, pad), title, font=title_font, fill=(248, 252, 255))
+    image.save(out)
+
+
+def _animated_realistic_event(scene: dict, event: str, size: tuple[int, int],
+                              out_dir: Path, duration: float, fps: int,
+                              cues: list[dict] | None) -> list[tuple[Path, float]]:
+    count = max(1, math.ceil(fps * duration))
+    frame_duration = duration / count
+    render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))
+    frames = []
+    for index in range(count):
+        scene_time = index / max(1, count - 1) * duration
+        progress = _event_progress(event, cues, scene_time, duration)
+        path = out_dir / f"event_{index:03d}.png"
+        if event == "rain":
+            _draw_rain_scene(scene, render_size, scene_time, path)
+        else:
+            _draw_building_collapse(scene, render_size, progress, path)
+        frames.append((path, frame_duration))
+    return frames
+
+
 def animated_instruction_scene(scene: dict, project_title: str, size: tuple[int, int],
                                theme: str, out_dir: Path, fps: int = 8,
                                loop_seconds: int = 4,
@@ -472,6 +668,11 @@ def animated_instruction_scene(scene: dict, project_title: str, size: tuple[int,
     if not math.isfinite(render_duration) or render_duration <= 0:
         raise ValueError("Scene duration must be a positive finite number")
     instructions = {**instructions, "duration": render_duration}
+    event = _realistic_event(scene)
+    if event:
+        return _animated_realistic_event(
+            scene, event, size, out_dir, render_duration, fps, cues
+        )
     count = max(1, math.ceil(fps * render_duration))
     frame_duration = render_duration / count
     render_size = (round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE))
@@ -590,6 +791,14 @@ def animated_title_card(scene: dict, idx: int, total: int, project_title: str,
                         size: tuple[int, int], theme: str, cues: list[dict],
                         out_dir: Path) -> list[tuple[Path, float]]:
     """Render one title-card image per spoken concept, in reveal order."""
+    event = _realistic_event(scene)
+    if event:
+        duration = max((float(cue["end"]) for cue in cues), default=1.0)
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("Narration cues must have a positive finite duration")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return _animated_realistic_event(scene, event, size, out_dir, duration, 8, cues)
+
     W, H = round(size[0] * SUPERSAMPLE), round(size[1] * SUPERSAMPLE)
     states = diagram_timeline(scene, cues, project_title)
     frames: list[tuple[Path, float]] = []

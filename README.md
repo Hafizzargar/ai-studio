@@ -9,6 +9,7 @@ Script or PDF in, narrated MP4 with burned-in subtitles and an SRT file out.
 - Script editor in a local web UI. `# Heading` lines start a scene; long paragraphs are split automatically.
 - PDF upload: headings, definitions, years, scanned-page detection, extractive script draft with page references.
 - Scenes can use a fixed-position concept map, a legacy moving water-cycle illustration, or the structured 2D animation engine for water-cycle, electric-circuit and French-Revolution starter lessons. It renders deterministic motion graphics from validated objects and actions, not AI-generated footage or a full physics simulation. PDF scenes can show the original PDF page with narrated sentences highlighted (the PDF is rendered as an image, never changed).
+- Narration describing rainfall animates drops from clouds to the ground; a described building collapse shows the structure falling into rubble, timed to its narration sentence. These event scenes are procedural illustrations rather than live-action footage or a physics simulation.
 - Offline voice: Piper (best), Windows built-in voices (SAPI, zero install, selectable with a voice preview), espeak-ng, or a silent test mode. English and Roman Urdu are selectable; Roman Urdu is read as typed by a Windows voice and may be pronounced approximately.
 - Exact sentence-level subtitles (SRT export and styled ASS burn-in).
 - Scene-by-scene rendering with checkpoints. Re-rendering only redoes scenes you changed. A failed scene never loses the others. Closing the app mid-render and rendering again resumes.
@@ -41,6 +42,10 @@ python -m engine.cli render <project_id> --force
 python -m engine.cli pdf-analyze book.pdf
 python -m pytest                                      # run the tests
 ```
+
+Create the three-character water-cycle demo with `python scripts\create_three_friends_demo.py` from the project virtual environment. It writes `demos\three-friends-water-cycle.mp4` and a speaker-labelled SRT; pass `--output` to choose another MP4 path. The original dialogue is in `demos\three-friends-water-cycle.txt`.
+
+Create an original 3D version with Blender installed by running `python scripts\create_three_friends_3d_demo.py`. It writes `demos\three-friends-water-cycle-3d.mp4` and a speaker-labelled SRT. The Blender scene is generated from simple, original 3D shapes; no third-party character artwork is used.
 
 Projects live in `projects\<id>\`: `project.json`, `source\` (script, original PDF), `scenes\<id>\` (audio, clip, cues), `renders\final.mp4`, `renders\final.srt`, `logs\render.log`.
 Set `AISTUDIO_PROJECTS` to store projects somewhere else (for example another drive).

@@ -53,7 +53,7 @@ pre{background:var(--bg);padding:8px;border-radius:var(--r);max-height:180px;ove
   <select id="n-aspect"><option>16:9</option><option>9:16</option><option>1:1</option></select>
   <div class="row"><button class="primary" id="create">Create project</button></div>
   <div class="row"><button id="water-cycle">Water cycle</button><button id="electric-circuit">Electric circuit</button><button id="french-revolution">French Revolution</button></div>
-  <p class="hint">Starter lessons use structured scene instructions for deterministic 2D animation. English only.</p>
+  <p class="hint">Starter lessons use structured 2D animation. Rainfall and building-collapse scenes are illustrated as concrete actions.</p>
 </aside>
 <main>
   <div id="banner"></div>
@@ -155,7 +155,7 @@ function drawScenes(){const tb=$('#scenes');tb.innerHTML='';
   P.scenes.forEach(sc=>{const h=el('input',{value:sc.heading,ariaLabel:'Heading '+sc.scene_id});h.oninput=()=>{sc.heading=h.value;sched()};
     let narrationSentenceList=null;const n=el('textarea',{value:sc.narration,rows:3,ariaLabel:'Narration '+sc.scene_id});n.oninput=()=>{sc.narration=n.value;instructionStatus.textContent=instructionLabel(sc);if(narrationSentenceList)narrationSentenceList.replaceChildren(...splitSentences(sc.narration).map((sentence,index)=>el('li',{textContent:`${index}: ${sentence}`})));sched()};
     const v=el('select',{ariaLabel:'Visual style '+sc.scene_id});
-    [['title_card','Concept map'],['water_cycle','Moving water cycle'],['instruction_scene','Structured 2D animation'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value,disabled:value==='instruction_scene'&&!((sc.visual||{}).instructions)})));
+    [['title_card','Concept map / event animation'],['water_cycle','Moving water cycle'],['instruction_scene','Structured 2D animation'],['pdf_page','PDF page']].forEach(([value,label])=>v.append(el('option',{value,textContent:label,selected:(sc.visual||{}).type===value,disabled:value==='instruction_scene'&&!((sc.visual||{}).instructions)})));
     v.onchange=()=>{sc.visual={...(sc.visual||{}),type:v.value};sched()};
     const instructionStatus=el('p',{className:'hint',textContent:instructionLabel(sc)});const visualCell=el('td',{},v,instructionStatus);
     if((sc.visual||{}).instructions){const editor=el('textarea',{rows:10,ariaLabel:'Structured animation instructions '+sc.scene_id,value:JSON.stringify(sc.visual.instructions,null,2)});const sentences=splitSentences(sc.narration);narrationSentenceList=el('ol',{},...sentences.map((sentence,index)=>el('li',{textContent:`${index}: ${sentence}`})));const review=el('button',{textContent:'Save as manually reviewed'});review.onclick=()=>reviewInstructions(sc,editor);const details=el('details',{className:'instruction-editor'},el('summary',{textContent:'Review / edit animation instructions'}),el('p',{className:'hint',textContent:'Actions must include a sentence_index matching the zero-based narration list. Saving preserves these instructions and marks them as manually reviewed for the current narration.'}),narrationSentenceList,editor,el('div',{className:'row'},review));visualCell.append(details)}

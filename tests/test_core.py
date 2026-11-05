@@ -5,7 +5,7 @@ import wave
 from PIL import Image, ImageChops
 import pytest
 
-from aistudio import config, project, scenes, subtitles, tts, jobs, visuals
+from aistudio import config, mascot, project, scenes, subtitles, tts, jobs, visuals
 from aistudio.animation import (
     InstructionError,
     bind_sentence_cues,
@@ -94,6 +94,43 @@ def test_diagram_reveals_and_highlights_concepts_at_spoken_words():
     assert len({box[1] for box in portrait}) == len(portrait)
 
 
+def test_realistic_event_scenes_animate_rain_and_building_collapse(tmp_path):
+    rain = scenes.new_scene(
+        1, "Rainfall",
+        "Dark clouds gather as raindrops fall from the clouds to the ground.",
+    )
+    assert visuals._realistic_event(rain) == "rain"
+    rain_frames = visuals.animated_title_card(
+        rain, 1, 1, "Weather", (320, 180), "documentary",
+        [{"start": 0.0, "end": 2.0, "text": rain["narration"]}], tmp_path / "rain",
+    )
+    assert len(rain_frames) == 16
+    with Image.open(rain_frames[0][0]) as first, Image.open(rain_frames[-1][0]) as last:
+        assert first.size == (480, 270)
+        assert ImageChops.difference(first.convert("RGB"), last.convert("RGB")).getbbox()
+
+    collapse = scenes.new_scene(
+        2, "A Building Collapses",
+        "The old building stood for years. Then the building collapsed into rubble.",
+    )
+    assert visuals._realistic_event(collapse) == "building_collapse"
+    cues = [
+        {"start": 0.0, "end": 1.0, "text": "The old building stood for years."},
+        {"start": 1.0, "end": 3.0, "text": "Then the building collapsed into rubble."},
+    ]
+    assert visuals._event_progress("building_collapse", cues, 0.9, 3.0) == 0
+    assert visuals._event_progress("building_collapse", cues, 3.0, 3.0) == 1
+    collapse_frames = visuals.animated_title_card(
+        collapse, 1, 1, "History", (320, 180), "documentary", cues,
+        tmp_path / "collapse",
+    )
+    with Image.open(collapse_frames[0][0]) as upright, \
+            Image.open(collapse_frames[-1][0]) as rubble:
+        assert ImageChops.difference(
+            upright.convert("RGB"), rubble.convert("RGB")
+        ).getbbox()
+
+
 def test_water_cycle_animation_has_motion_and_focuses_scene_phase(tmp_path):
     scene = scenes.new_scene(1, "Precipitation", "Cloud droplets fall as rain.")
     assert visuals.water_cycle_phase(scene["heading"]) == "precipitation"
@@ -112,6 +149,72 @@ def test_water_cycle_animation_has_motion_and_focuses_scene_phase(tmp_path):
                 initial, later.convert("RGB")
             ).getbbox() is not None
     assert moved
+
+
+def test_original_guide_character_demo_has_distinct_animated_scenes(tmp_path):
+    cues = [
+        {"start": 0.15, "end": 1.0, "text": "Hello."},
+        {"start": 1.3, "end": 2.2, "text": "Look over here."},
+        {"start": 2.5, "end": 3.4, "text": "What do you think?"},
+        {"start": 3.7, "end": 4.6, "text": "Great work."},
+    ]
+
+    frames = mascot.animated_guide_demo(cues, tmp_path, (320, 180), fps=4)
+
+    assert len(frames) == 19
+    assert all(path.exists() and duration > 0 for path, duration in frames)
+    with Image.open(frames[1][0]) as first, Image.open(frames[6][0]) as second:
+        assert first.size == (480, 270)
+        assert ImageChops.difference(first.convert("RGB"), second.convert("RGB")).getbbox()
+    with Image.open(frames[10][0]) as thinking, Image.open(frames[16][0]) as celebrating:
+        assert ImageChops.difference(
+            thinking.convert("RGB"), celebrating.convert("RGB")
+        ).getbbox()
+
+    extended = mascot.animated_guide_demo(cues, tmp_path / "tail", (320, 180), fps=4, duration=5)
+    assert len(extended) == 20
+    assert sum(frame_duration for _, frame_duration in extended) == pytest.approx(5)
+
+
+def test_three_person_dialogue_script_and_animation(tmp_path):
+    script = (
+        "Pip [think, curious]: Why does the puddle shrink?\n"
+        "Maya [point, happy]: The Sun warms the water.\n"
+        "Ravi [wave, surprised]: It can evaporate!\n"
+    )
+    cues = mascot.parse_dialogue_script(script)
+    assert [cue["speaker"] for cue in cues] == ["Pip", "Maya", "Ravi"]
+    assert cues[0]["gesture"] == "think"
+
+    frames = mascot.animated_dialogue_demo(
+        [
+            {"start": 0.0, "end": 0.45, "speaker": "Pip", "gesture": "think",
+             "expression": "curious", "text": "Why does the puddle shrink?"},
+            {"start": 0.5, "end": 0.95, "speaker": "Maya", "gesture": "point",
+             "expression": "happy", "text": "The Sun warms the water."},
+            {"start": 1.0, "end": 1.45, "speaker": "Ravi", "gesture": "wave",
+             "expression": "surprised", "text": "It can evaporate!"},
+        ],
+        tmp_path, (320, 180), fps=4,
+    )
+
+    assert len(frames) == 6
+    with Image.open(frames[0][0]) as pip, Image.open(frames[2][0]) as maya, \
+            Image.open(frames[4][0]) as ravi:
+        assert pip.size == (480, 270)
+        assert ImageChops.difference(pip.convert("RGB"), maya.convert("RGB")).getbbox()
+        assert ImageChops.difference(maya.convert("RGB"), ravi.convert("RGB")).getbbox()
+
+
+def test_three_person_dialogue_rejects_missing_speaker_and_bad_stage_direction():
+    with pytest.raises(ValueError, match="must include Pip, Maya, and Ravi"):
+        mascot.parse_dialogue_script("Pip [wave, happy]: Hello.\n")
+    with pytest.raises(ValueError, match="unsupported gesture"):
+        mascot.parse_dialogue_script(
+            "Pip [dance, happy]: Hello.\n"
+            "Maya [wave, happy]: Hi.\n"
+            "Ravi [think, curious]: Hey.\n"
+        )
 
 
 def test_instruction_schema_rejects_invalid_actions_and_timing():

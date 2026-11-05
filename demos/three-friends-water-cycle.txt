@@ -1,0 +1,15 @@
+# Three original characters explain the water cycle.
+# Format: Name [gesture, expression]: spoken line
+
+Pip [think, curious]: I found a puddle after the rain. Why does it get smaller when the Sun comes out?
+Maya [point, happy]: The Sun warms the water. Some liquid water changes into an invisible gas called water vapor.
+Ravi [wave, happy]: That change is evaporation. The vapor rises into the air, just like steam drifting upward from a warm cup.
+Pip [think, curious]: If the vapor is invisible, how do clouds appear?
+Maya [point, happy]: Higher in the sky, the air is cooler. Water vapor cools and condenses into tiny liquid droplets, or ice crystals.
+Ravi [celebrate, happy]: Those droplets and crystals gather to make clouds. A cloud is made of tiny water droplets or ice crystals, not water vapor.
+Pip [point, surprised]: And when the cloud gets full, does it pour?
+Maya [point, happy]: When droplets or ice crystals grow heavy enough, water falls from clouds as precipitation, such as rain or snow.
+Ravi [wave, happy]: Some water flows over land into streams and rivers. Some soaks into the ground, and some returns to lakes and oceans.
+Pip [think, curious]: Then the Sun can warm that water again, and the journey starts over!
+Maya [celebrate, happy]: Exactly. Evaporation, condensation, precipitation, and collection are connected parts of the water cycle.
+Ravi [wave, happy]: So our puddle did not vanish. Its water moved on, and it can visit the clouds and return another day!

@@ -1,0 +1,8 @@
+# A short 3D cartoon conversation. Stage directions are rendered as gestures.
+
+Pip [think, curious]: Why does a sunny day make my puddle smaller?
+Maya [point, happy]: The Sun warms the water, and some of it evaporates into invisible water vapor.
+Ravi [wave, happy]: High in the cool sky, the vapor condenses into tiny droplets that make clouds.
+Pip [point, surprised]: Then rain falls when those droplets grow heavy?
+Maya [celebrate, happy]: That's right! Rain is precipitation, and the water flows back to rivers and oceans.
+Ravi [wave, happy]: The Sun warms it again, and the water cycle starts over!

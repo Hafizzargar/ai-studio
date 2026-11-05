@@ -1,0 +1,23 @@
+1
+00:00:00,150 --> 00:00:03,344
+Pip: Why does a sunny day make my puddle smaller?
+
+2
+00:00:03,644 --> 00:00:08,183
+Maya: The Sun warms the water, and some of it evaporates into invisible water vapor.
+
+3
+00:00:08,483 --> 00:00:15,226
+Ravi: High in the cool sky, the vapor condenses into tiny droplets that make clouds.
+
+4
+00:00:15,526 --> 00:00:18,895
+Pip: Then rain falls when those droplets grow heavy?
+
+5
+00:00:19,195 --> 00:00:24,838
+Maya: That's right! Rain is precipitation, and the water flows back to rivers and oceans.
+
+6
+00:00:25,138 --> 00:00:30,437
+Ravi: The Sun warms it again, and the water cycle starts over!
